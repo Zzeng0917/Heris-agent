@@ -492,3 +492,58 @@ Requirements:
     def get_history(self) -> list[Message]:
         """Get message history."""
         return self.messages.copy()
+
+    def update_persona(self, mode_prompt: str):
+        """Update the persona/mode portion of the system prompt.
+
+        This method updates the system message (messages[0]) by replacing
+        the {MODE_PROMPT} placeholder with the actual mode prompt content.
+
+        Args:
+            mode_prompt: The mode-specific prompt text to inject.
+        """
+        if not self.messages or not self.messages[0].role == "system":
+            return
+
+        current_system = self.messages[0].content
+
+        # Replace the {MODE_PROMPT} placeholder with actual content
+        if "{MODE_PROMPT}" in current_system:
+            new_system = current_system.replace("{MODE_PROMPT}", mode_prompt)
+        else:
+            # If placeholder was already replaced, we need to strip the old mode prompt
+            # and inject the new one. We assume mode prompts start with "## Your Persona"
+            # or are empty for normal mode.
+            lines = current_system.split("\n")
+            new_lines = []
+            in_mode_section = False
+
+            for line in lines:
+                # Detect start of mode section
+                if "## Your Persona" in line or "## Custom Persona" in line:
+                    in_mode_section = True
+                    continue
+                # Detect end of mode section (next ## heading that is not part of persona)
+                if in_mode_section and line.startswith("## "):
+                    in_mode_section = False
+
+                if not in_mode_section:
+                    new_lines.append(line)
+
+            new_system = "\n".join(new_lines)
+
+            # Insert new mode prompt before "## Core Capabilities"
+            if "## Core Capabilities" in new_system:
+                new_system = new_system.replace(
+                    "## Core Capabilities",
+                    f"{mode_prompt}\n\n## Core Capabilities" if mode_prompt else "## Core Capabilities"
+                )
+            else:
+                new_system = f"{new_system}\n\n{mode_prompt}" if mode_prompt else new_system
+
+        self.messages[0].content = new_system
+        self.system_prompt = new_system
+
+        # Track current mode on agent for reference
+        if not hasattr(self, "current_mode"):
+            self.current_mode = None

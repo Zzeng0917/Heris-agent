@@ -1,0 +1,38 @@
+{
+  "name": "heris",
+  "version": "1.0.0",
+  "description": "**Heris** is a personal AI agent project. A minimal yet professional framework for building agents with the MiniMax M2.5 model. Leveraging an Anthropic-compatible API, it fully supports interleaved thinking to unlock M2's powerful reasoning capabilities for long, complex tasks.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zzeng0917/Heris-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Zzeng0917/Heris-agent/issues"
+  },
+  "homepage": "https://github.com/Zzeng0917/Heris-agent#readme",
+  "devDependencies": {
+    "@clack/prompts": "^1.1.0",
+    "@types/cli-progress": "^3.11.6",
+    "@types/node": "^25.3.3",
+    "chalk": "^5.6.2",
+    "cli-progress": "^3.12.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "picocolors": "^1.1.1"
+  }
+}
