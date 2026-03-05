@@ -6,7 +6,7 @@ from typing import Any
 import anthropic
 
 from ..retry import RetryConfig, async_retry
-from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
+from ..schema import FunctionCall, LLMResponse, Message, StreamChunk, TokenUsage, ToolCall
 from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -291,3 +291,132 @@ class AnthropicClient(LLMClientBase):
 
         # Parse and return response
         return self._parse_response(response)
+
+    async def generate_stream(
+        self,
+        messages: list[Message],
+        tools: list[Any] | None = None,
+    ):
+        """Generate streaming response from Anthropic LLM.
+
+        Args:
+            messages: List of conversation messages
+            tools: Optional list of available tools
+
+        Yields:
+            StreamChunk containing a piece of the generated content
+        """
+        import anthropic
+
+        # Prepare request
+        request_params = self._prepare_request(messages, tools)
+        system_message = request_params["system_message"]
+        api_messages = request_params["api_messages"]
+
+        # Build request params
+        params = {
+            "model": self.model,
+            "max_tokens": 16384,
+            "messages": api_messages,
+            "stream": True,
+        }
+
+        if system_message:
+            params["system"] = system_message
+
+        if request_params["tools"]:
+            params["tools"] = self._convert_tools(request_params["tools"])
+
+        # Track accumulated data
+        text_content = ""
+        thinking_content = ""
+        tool_calls_data = {}  # id -> {"name": str, "arguments": str}
+        current_tool_id = None
+        usage = None
+
+        # Make streaming API request
+        stream = await self.client.messages.create(**params)
+
+        async for event in stream:
+            # Handle different event types
+            if event.type == "content_block_start":
+                block = event.content_block
+                if block.type == "tool_use":
+                    # New tool call started
+                    current_tool_id = block.id
+                    tool_calls_data[current_tool_id] = {
+                        "name": block.name,
+                        "arguments": "",
+                    }
+
+            elif event.type == "content_block_delta":
+                delta = event.delta
+                if delta.type == "text_delta":
+                    text_content += delta.text
+                    yield StreamChunk(content=delta.text)
+                elif delta.type == "thinking_delta":
+                    thinking_content += delta.thinking
+                    yield StreamChunk(thinking=delta.thinking)
+                elif delta.type == "input_json_delta":
+                    # Accumulate tool call arguments
+                    if current_tool_id and current_tool_id in tool_calls_data:
+                        tool_calls_data[current_tool_id]["arguments"] += delta.partial_json
+
+            elif event.type == "message_stop":
+                # Build tool calls from accumulated data
+                tool_calls = []
+                for tool_id, tool_data in tool_calls_data.items():
+                    try:
+                        import json
+                        arguments = json.loads(tool_data["arguments"])
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    tool_calls.append(
+                        ToolCall(
+                            id=tool_id,
+                            type="function",
+                            function=FunctionCall(
+                                name=tool_data["name"],
+                                arguments=arguments,
+                            ),
+                        )
+                    )
+
+                # Extract usage from message if available
+                if hasattr(event, "message") and event.message and hasattr(event.message, "usage"):
+                    msg_usage = event.message.usage
+                    if msg_usage:
+                        input_tokens = msg_usage.input_tokens or 0
+                        output_tokens = msg_usage.output_tokens or 0
+                        cache_read_tokens = getattr(msg_usage, "cache_read_input_tokens", 0) or 0
+                        cache_creation_tokens = getattr(msg_usage, "cache_creation_input_tokens", 0) or 0
+                        total_input_tokens = input_tokens + cache_read_tokens + cache_creation_tokens
+                        usage = TokenUsage(
+                            prompt_tokens=total_input_tokens,
+                            completion_tokens=output_tokens,
+                            total_tokens=total_input_tokens + output_tokens,
+                        )
+
+                # Yield final chunk with complete data
+                yield StreamChunk(
+                    content="",  # Content already yielded chunk by chunk
+                    thinking="",  # Thinking already yielded chunk by chunk
+                    tool_calls=tool_calls if tool_calls else None,
+                    is_complete=True,
+                    usage=usage,
+                )
+
+            elif event.type == "message":
+                # Sometimes usage comes in a message event at the end
+                if hasattr(event, "usage") and event.usage:
+                    msg_usage = event.usage
+                    input_tokens = msg_usage.input_tokens or 0
+                    output_tokens = msg_usage.output_tokens or 0
+                    cache_read_tokens = getattr(msg_usage, "cache_read_input_tokens", 0) or 0
+                    cache_creation_tokens = getattr(msg_usage, "cache_creation_input_tokens", 0) or 0
+                    total_input_tokens = input_tokens + cache_read_tokens + cache_creation_tokens
+                    usage = TokenUsage(
+                        prompt_tokens=total_input_tokens,
+                        completion_tokens=output_tokens,
+                        total_tokens=total_input_tokens + output_tokens,
+                    )

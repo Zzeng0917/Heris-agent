@@ -7,7 +7,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from ..retry import RetryConfig, async_retry
-from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
+from ..schema import FunctionCall, LLMResponse, Message, StreamChunk, TokenUsage, ToolCall
 from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -293,3 +293,118 @@ class OpenAIClient(LLMClientBase):
 
         # Parse and return response
         return self._parse_response(response)
+
+    async def generate_stream(
+        self,
+        messages: list[Message],
+        tools: list[Any] | None = None,
+    ):
+        """Generate streaming response from OpenAI LLM.
+
+        Args:
+            messages: List of conversation messages
+            tools: Optional list of available tools
+
+        Yields:
+            StreamChunk containing a piece of the generated content
+        """
+        # Prepare request
+        request_params = self._prepare_request(messages, tools)
+        api_messages = request_params["api_messages"]
+
+        # Build request params
+        params = {
+            "model": self.model,
+            "messages": api_messages,
+            "stream": True,
+            # Enable reasoning_split to separate thinking content
+            "extra_body": {"reasoning_split": True},
+        }
+
+        if request_params["tools"]:
+            params["tools"] = self._convert_tools(request_params["tools"])
+
+        # Track accumulated data
+        text_content = ""
+        thinking_content = ""
+        tool_calls_data = {}  # index -> {"id": str, "name": str, "arguments": str}
+        usage = None
+
+        # Make streaming API request
+        stream = await self.client.chat.completions.create(**params)
+
+        async for chunk in stream:
+            # Handle usage info in the final chunk
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = TokenUsage(
+                    prompt_tokens=chunk.usage.prompt_tokens or 0,
+                    completion_tokens=chunk.usage.completion_tokens or 0,
+                    total_tokens=chunk.usage.total_tokens or 0,
+                )
+
+            if not chunk.choices:
+                continue
+
+            delta = chunk.choices[0].delta
+
+            # Handle reasoning/thinking content
+            if hasattr(delta, "reasoning") and delta.reasoning:
+                thinking_content += delta.reasoning
+                yield StreamChunk(thinking=delta.reasoning)
+
+            # Handle text content
+            if delta.content:
+                text_content += delta.content
+                yield StreamChunk(content=delta.content)
+
+            # Handle tool calls
+            if delta.tool_calls:
+                for tool_call in delta.tool_calls:
+                    index = tool_call.index
+
+                    # Initialize new tool call
+                    if index not in tool_calls_data:
+                        tool_calls_data[index] = {
+                            "id": tool_call.id or "",
+                            "name": tool_call.function.name or "",
+                            "arguments": tool_call.function.arguments or "",
+                        }
+                    else:
+                        # Accumulate tool call data
+                        if tool_call.id:
+                            tool_calls_data[index]["id"] = tool_call.id
+                        if tool_call.function.name:
+                            tool_calls_data[index]["name"] = tool_call.function.name
+                        if tool_call.function.arguments:
+                            tool_calls_data[index]["arguments"] += tool_call.function.arguments
+
+            # Check for finish reason
+            finish_reason = chunk.choices[0].finish_reason
+            if finish_reason:
+                # Build tool calls from accumulated data
+                tool_calls = []
+                for idx in sorted(tool_calls_data.keys()):
+                    tool_data = tool_calls_data[idx]
+                    try:
+                        arguments = json.loads(tool_data["arguments"])
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    tool_calls.append(
+                        ToolCall(
+                            id=tool_data["id"],
+                            type="function",
+                            function=FunctionCall(
+                                name=tool_data["name"],
+                                arguments=arguments,
+                            ),
+                        )
+                    )
+
+                # Yield final chunk with complete data
+                yield StreamChunk(
+                    content="",  # Content already yielded chunk by chunk
+                    thinking="",  # Thinking already yielded chunk by chunk
+                    tool_calls=tool_calls if tool_calls else None,
+                    is_complete=True,
+                    usage=usage,
+                )

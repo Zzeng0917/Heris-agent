@@ -1,10 +1,9 @@
 """Tests for Agent's persona update functionality."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from heris.agent import Agent
-from heris.modes import AgentMode, ModeType
 
 
 class TestAgentUpdatePersona:
@@ -147,109 +146,3 @@ You can help with various tasks."""
         original_content = agent.messages[0].content
         agent.update_persona("Test persona")
         assert agent.messages[0].content == original_content
-
-
-class TestAgentModeIntegration:
-    """Test integration between Agent and Mode system."""
-
-    @pytest.fixture
-    def mock_llm_client(self):
-        """Create a mock LLM client."""
-        return MagicMock()
-
-    @pytest.fixture
-    def agent(self, mock_llm_client):
-        """Create a basic agent."""
-        return Agent(
-            llm_client=mock_llm_client,
-            system_prompt="You are Heris.\n\n{MODE_PROMPT}\n\n## Core Capabilities",
-            tools=[],
-            workspace_dir="/tmp/test"
-        )
-
-    def test_agent_with_normal_mode(self, agent):
-        """Test agent behavior with normal mode."""
-        mode = AgentMode(mode_type=ModeType.NORMAL)
-        prompt = mode.build_prompt_injection()
-
-        agent.update_persona(prompt)
-
-        # Normal mode prompt is empty
-        assert "You are Heris" in agent.messages[0].content
-
-    def test_agent_with_push_mode(self, agent):
-        """Test agent behavior with PUSH mode."""
-        mode = AgentMode(mode_type=ModeType.PUSH)
-        prompt = mode.build_prompt_injection()
-
-        agent.update_persona(prompt)
-
-        content = agent.messages[0].content
-        assert "energetic" in content.lower() or "optimistic" in content.lower()
-        assert "You are Heris" in content
-        assert "## Core Capabilities" in content
-
-    def test_agent_with_slackin_mode(self, agent):
-        """Test agent behavior with 摸鱼 mode."""
-        mode = AgentMode(mode_type=ModeType.SLACKIN)
-        prompt = mode.build_prompt_injection()
-
-        agent.update_persona(prompt)
-
-        content = agent.messages[0].content
-        assert "relaxed" in content.lower() or "easygoing" in content.lower()
-        assert "You are Heris" in content
-        assert "## Core Capabilities" in content
-
-    def test_multiple_mode_switches(self, agent):
-        """Test switching modes multiple times."""
-        # Start with PUSH
-        push_mode = AgentMode(mode_type=ModeType.PUSH)
-        agent.update_persona(push_mode.build_prompt_injection())
-
-        # Switch to SLACKIN
-        slackin_mode = AgentMode(mode_type=ModeType.SLACKIN)
-        agent.update_persona(slackin_mode.build_prompt_injection())
-
-        # Switch back to NORMAL
-        normal_mode = AgentMode(mode_type=ModeType.NORMAL)
-        agent.update_persona(normal_mode.build_prompt_injection())
-
-        content = agent.messages[0].content
-        # Should still have the base content
-        assert "You are Heris" in content
-        assert "## Core Capabilities" in content
-
-
-class TestAgentCurrentMode:
-    """Test agent's current_mode attribute behavior."""
-
-    @pytest.fixture
-    def mock_llm_client(self):
-        return MagicMock()
-
-    def test_current_mode_defaults_to_none(self, mock_llm_client):
-        """Test that current_mode is not set by default."""
-        agent = Agent(
-            llm_client=mock_llm_client,
-            system_prompt="Test",
-            tools=[],
-            workspace_dir="/tmp/test"
-        )
-
-        assert not hasattr(agent, 'current_mode') or agent.current_mode is None
-
-    def test_current_mode_can_be_set(self, mock_llm_client):
-        """Test that current_mode can be set externally."""
-        agent = Agent(
-            llm_client=mock_llm_client,
-            system_prompt="Test",
-            tools=[],
-            workspace_dir="/tmp/test"
-        )
-
-        mode = AgentMode(mode_type=ModeType.PUSH)
-        agent.current_mode = mode
-
-        assert agent.current_mode == mode
-        assert agent.current_mode.mode_type == ModeType.PUSH

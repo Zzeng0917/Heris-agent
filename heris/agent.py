@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from time import perf_counter
 from typing import Optional
@@ -10,7 +11,7 @@ import tiktoken
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .schema import Message
+from .schema import Message, StreamChunk
 from .tools.base import Tool, ToolResult
 
 
@@ -364,8 +365,73 @@ Requirements:
             # Log LLM request and call LLM with Tool objects directly
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
+            # Use streaming output - Kode style: direct streaming, no thinking indicator
+            content_parts = []
+            thinking_parts = []
+            tool_calls = None
+            usage = None
+            finish_reason = "stop"
+
+            # Track display state
+            has_started = False
+
+            # Buffer for smooth streaming
+            buffer = []
+            buffer_len = 0
+            last_flush_time = perf_counter()
+            BUFFER_SIZE = 12  # Characters to buffer before flushing
+            FLUSH_INTERVAL = 0.02  # Max seconds between flushes (20ms)
+
             try:
-                response = await self.llm.generate(messages=self.messages, tools=tool_list)
+                async for chunk in self.llm.generate_stream(messages=self.messages, tools=tool_list):
+                    # Check for cancellation
+                    if self._check_cancelled():
+                        break
+
+                    # Handle thinking content - accumulate but don't display
+                    if chunk.thinking:
+                        thinking_parts.append(chunk.thinking)
+
+                    # Handle text content - stream with buffering for smoothness
+                    elif chunk.content:
+                        if not has_started:
+                            # First content: print prefix like Kode's BLACK_CIRCLE
+                            has_started = True
+                            print(f"\n{Colors.PRIMARY}●{Colors.RESET} ", end="", flush=True)
+
+                        # Add to buffer
+                        buffer.append(chunk.content)
+                        buffer_len += len(chunk.content)
+                        content_parts.append(chunk.content)
+
+                        # Flush conditions: buffer full, interval exceeded, or natural break point
+                        current_time = perf_counter()
+                        should_flush = (
+                            buffer_len >= BUFFER_SIZE or
+                            (current_time - last_flush_time) >= FLUSH_INTERVAL or
+                            chunk.content.endswith(('. ', '! ', '? ', ', ', '：', '。', '\n'))
+                        )
+
+                        if should_flush:
+                            if buffer:
+                                text = "".join(buffer)
+                                sys.stdout.write(text)
+                                sys.stdout.flush()
+                                buffer.clear()
+                                buffer_len = 0
+                                last_flush_time = current_time
+
+                    # Handle completion
+                    elif chunk.is_complete:
+                        tool_calls = chunk.tool_calls
+                        usage = chunk.usage
+                        break
+
+                # Flush any remaining content
+                if buffer:
+                    sys.stdout.write("".join(buffer))
+                    sys.stdout.flush()
+
             except Exception as e:
                 # Check if it's a retry exhausted error
                 from .retry import RetryExhaustedError
@@ -378,38 +444,45 @@ Requirements:
                     print(f"\n{Colors.ERROR}  {error_msg}{Colors.RESET}")
                 return error_msg
 
+            # Final newline if we printed anything
+            if has_started:
+                print()
+
+            # Check for cancellation after streaming
+            if self._check_cancelled():
+                self._cleanup_incomplete_messages()
+                cancel_msg = "已取消"
+                print(f"\n{Colors.WARNING}  {cancel_msg}{Colors.RESET}")
+                return cancel_msg
+
+            # Build full response
+            full_content = "".join(content_parts)
+            full_thinking = "".join(thinking_parts) if thinking_parts else None
+
             # Accumulate API reported token usage
-            if response.usage:
-                self.api_total_tokens = response.usage.total_tokens
+            if usage:
+                self.api_total_tokens = usage.total_tokens
 
             # Log LLM response
             self.logger.log_response(
-                content=response.content,
-                thinking=response.thinking,
-                tool_calls=response.tool_calls,
-                finish_reason=response.finish_reason,
+                content=full_content,
+                thinking=full_thinking,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
             )
 
             # Add assistant message
             assistant_msg = Message(
                 role="assistant",
-                content=response.content,
-                thinking=response.thinking,
-                tool_calls=response.tool_calls,
+                content=full_content,
+                thinking=full_thinking,
+                tool_calls=tool_calls,
             )
             self.messages.append(assistant_msg)
 
-            # Print thinking if present - simplified
-            if response.thinking:
-                print(f"\n{Colors.SECONDARY}[思考] {response.thinking}{Colors.RESET}")
-
-            # Print assistant response - simplified
-            if response.content:
-                print(f"\n{response.content}")
-
             # Check if task is complete (no tool calls)
-            if not response.tool_calls:
-                return response.content
+            if not tool_calls:
+                return full_content
 
             # Check for cancellation before executing tools
             if self._check_cancelled():
@@ -418,14 +491,14 @@ Requirements:
                 print(f"\n{Colors.WARNING}  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
-            # Execute tool calls - simplified display
-            for tool_call in response.tool_calls:
+            # Execute tool calls - Kode style display
+            for tool_call in tool_calls:
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
                 arguments = tool_call.function.arguments
 
-                # Tool call header - simplified (no emoji, just color)
-                print(f"\n{Colors.TOOL}→ {function_name}{Colors.RESET}")
+                # Kode style: tool name with dot prefix, inline with params
+                print(f"\n{Colors.TOOL}· {function_name}{Colors.RESET}", end="", flush=True)
 
                 # Execute tool
                 if function_name not in self.tools:
@@ -457,14 +530,17 @@ Requirements:
                     result_error=result.error if not result.success else None,
                 )
 
-                # Print result - simplified
+                # Kode style: result with ⎿ prefix on next line
                 if result.success:
-                    result_text = result.content
-                    if len(result_text) > 200:
-                        result_text = result_text[:200] + f"{Colors.SECONDARY}...{Colors.RESET}"
-                    print(f"{Colors.SUCCESS}  ✓ {result_text}{Colors.RESET}")
+                    result_text = result.content.replace("\n", " ")
+                    if len(result_text) > 60:
+                        result_text = result_text[:60] + "..."
+                    print(f"\n{Colors.SUCCESS}  ⎿ {result_text}{Colors.RESET}")
                 else:
-                    print(f"{Colors.ERROR}  ✗ {result.error}{Colors.RESET}")
+                    error_text = result.error.replace("\n", " ") if result.error else "错误"
+                    if len(error_text) > 60:
+                        error_text = error_text[:60] + "..."
+                    print(f"\n{Colors.ERROR}  ⎿ {error_text}{Colors.RESET}")
 
                 # Add tool result message
                 tool_msg = Message(

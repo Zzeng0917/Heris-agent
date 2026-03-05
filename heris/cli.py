@@ -30,8 +30,6 @@ from heris.tools.file_tools import EditTool, ReadTool, WriteTool
 from heris.tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
 from heris.tools.note_tool import SessionNoteTool
 from heris.tools.skill_tool import create_skill_tools
-from heris.tools.mode_tool import SetModeTool, GetCurrentModeTool
-from heris.modes import AgentMode, ModeType, get_mode_choices, create_mode_from_string
 
 
 class Colors:
@@ -130,7 +128,6 @@ def print_help():
   {Colors.PRIMARY}/stats{Colors.RESET}     显示会话统计
   {Colors.PRIMARY}/log{Colors.RESET}       查看日志目录
   {Colors.PRIMARY}/log <file>{Colors.RESET} 读取指定日志文件
-  {Colors.PRIMARY}/mode{Colors.RESET}      查看或切换助手模式
   {Colors.PRIMARY}/exit{Colors.RESET}      退出程序
 
 {Colors.BOLD}快捷键:{Colors.RESET}
@@ -145,10 +142,13 @@ def print_help():
 
 
 def print_session_info(agent: Agent, workspace_dir: Path, model: str):
-    print(f"{Colors.SECONDARY}  模型: {Colors.RESET}{model}")
-    print(f"{Colors.SECONDARY}  工作区: {Colors.RESET}{workspace_dir}")
-    print(f"{Colors.SECONDARY}  工具: {Colors.RESET}{len(agent.tools)} 个")
-    print()
+    from rich.console import Console
+    from rich.panel import Panel
+    console = Console()
+    
+    info_text = f"[cyan]模型 (Model):[/cyan] {model}\n[cyan]位置 (Workspace):[/cyan] {workspace_dir}"
+    console.print(Panel(info_text, border_style="cyan", expand=False))
+    console.print()
 
 
 def print_stats(agent: Agent, session_start: datetime):
@@ -175,10 +175,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace", "-w", type=str, default=None)
     parser.add_argument("--task", "-t", type=str, default=None)
     parser.add_argument("--version", "-v", action="version", version="heris 0.1.0")
-    parser.add_argument(
-        "--mode", "-m", type=str, default=None,
-        choices=["normal", "push", "slackin"],
-    )
     subparsers = parser.add_subparsers(dest="command")
     log_parser = subparsers.add_parser("log")
     log_parser.add_argument("filename", nargs="?", default=None)
@@ -192,9 +188,6 @@ async def initialize_base_tools(config: Config):
     if config.tools.enable_bash:
         tools.append(BashOutputTool())
         tools.append(BashKillTool())
-
-    tools.append(SetModeTool())
-    tools.append(GetCurrentModeTool())
 
     if config.tools.enable_skills:
         try:
@@ -260,7 +253,7 @@ async def _quiet_cleanup():
         pass
 
 
-async def run_agent(workspace_dir: Path, task: str = None, mode: AgentMode = None):
+async def run_agent(workspace_dir: Path, task: str = None):
     session_start = datetime.now()
 
     config_path = Config.get_default_config_path()
@@ -315,15 +308,6 @@ async def run_agent(workspace_dir: Path, task: str = None, mode: AgentMode = Non
     else:
         system_prompt = system_prompt.replace("{SKILLS_METADATA}", "")
 
-    if mode is None:
-        mode = AgentMode(mode_type=ModeType.NORMAL)
-
-    mode_prompt = mode.build_prompt_injection()
-    if "{MODE_PROMPT}" in system_prompt:
-        system_prompt = system_prompt.replace("{MODE_PROMPT}", mode_prompt)
-    elif mode_prompt:
-        system_prompt = f"{system_prompt}\n\n{mode_prompt}"
-
     agent = Agent(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -331,11 +315,6 @@ async def run_agent(workspace_dir: Path, task: str = None, mode: AgentMode = Non
         max_steps=config.agent.max_steps,
         workspace_dir=str(workspace_dir),
     )
-    agent.current_mode = mode
-
-    for tool in tools:
-        if isinstance(tool, (SetModeTool, GetCurrentModeTool)):
-            tool.set_agent(agent)
 
     # 非交互模式
     if task:
@@ -355,7 +334,7 @@ async def run_agent(workspace_dir: Path, task: str = None, mode: AgentMode = Non
 
     # 构建 prompt_toolkit session
     command_completer = WordCompleter(
-        ["/help", "/clear", "/history", "/stats", "/log", "/mode", "/exit", "/quit", "/q"],
+        ["/help", "/clear", "/history", "/stats", "/log", "/exit", "/quit", "/q"],
         ignore_case=True, sentence=True,
     )
     prompt_style = Style.from_dict({
@@ -427,32 +406,6 @@ async def run_agent(workspace_dir: Path, task: str = None, mode: AgentMode = Non
                     else:
                         read_log_file(parts[1].strip("\"'"))
 
-                elif command == "/mode" or command.startswith("/mode "):
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) == 1:
-                        mode_tool = GetCurrentModeTool(agent)
-                        result = await mode_tool.execute()
-                        if result.success:
-                            print(f"\n{Colors.PRIMARY}  {result.content}{Colors.RESET}\n")
-                        else:
-                            print(f"\n{Colors.ERROR}  {result.error}{Colors.RESET}\n")
-                    else:
-                        subcommand = parts[1].lower().strip()
-                        if subcommand == "list":
-                            print(f"\n{Colors.PRIMARY}可用模式:{Colors.RESET}")
-                            for mode_type, name, desc in get_mode_choices():
-                                print(f"  {Colors.PRIMARY}{mode_type.value}{Colors.RESET} - {name}")
-                                print(f"     {Colors.SECONDARY}{desc}{Colors.RESET}")
-                            print()
-                        elif subcommand in ["normal", "push", "slackin"]:
-                            mode_tool = SetModeTool(agent)
-                            result = await mode_tool.execute(mode=subcommand)
-                            if result.success:
-                                print(f"\n{Colors.SUCCESS}  {result.content}{Colors.RESET}\n")
-                            else:
-                                print(f"\n{Colors.ERROR}  {result.error}{Colors.RESET}\n")
-                        else:
-                            print(f"\n{Colors.WARNING}  未知模式: {subcommand}，可用: normal, push, slackin{Colors.RESET}\n")
                 else:
                     print(f"{Colors.WARNING}  未知命令: {user_input}，输入 /help 查看帮助{Colors.RESET}\n")
                 continue
@@ -535,34 +488,46 @@ async def run_agent(workspace_dir: Path, task: str = None, mode: AgentMode = Non
     await _quiet_cleanup()
 
 
-def run_typescript_ui() -> AgentMode:
-    """运行 TypeScript 启动 UI，返回用户选择的模式。"""
-    root_dir = Path(__file__).parent.parent
-    ts_script = root_dir / "src" / "index.ts"
-    tmp_file = Path(tempfile.gettempdir()) / "heris_mode_selection"
+def run_python_ui() -> bool:
+    """运行 Python 启动 UI。"""
+    import os
+    import time
+    from rich.console import Console
+    from rich.progress import Progress, BarColumn, TextColumn
 
-    # 清理上次残留
-    if tmp_file.exists():
-        tmp_file.unlink()
+    console = Console()
+    console.clear()
 
-    try:
-        subprocess.run(
-            ["npx", "tsx", str(ts_script)],
-            cwd=str(root_dir),
-        )
-    except Exception:
-        pass
+    art = """
+  ██   ██  ███████  ██████   ███████  ███████
+  ██   ██  ██       ██   ██    ██     ██     
+  ███████  █████    ██████     ██     ███████
+  ██   ██  ██       ██   ██    ██          ██
+  ██   ██  ███████  ██   ██  ███████  ███████
+                                           v0.1.0"""
+    
+    console.print()
+    for line in art.strip('\n').split('\n'):
+        console.print(f"  [cyan]{line}[/cyan]")
+        
+    console.print("  [dim]" + "─" * 50 + "[/dim]\n")
 
-    # 读取模式选择结果
-    if tmp_file.exists():
-        mode_str = tmp_file.read_text(encoding="utf-8").strip()
-        tmp_file.unlink(missing_ok=True)
-        try:
-            return create_mode_from_string(mode_str)
-        except ValueError:
-            pass
+    # 渲染进度条
+    with Progress(
+        TextColumn("  "),
+        BarColumn(bar_width=50, complete_style="cyan", finished_style="cyan"),
+        TextColumn(" [dim]{task.percentage:>3.0f}%[/dim]"),
+        TextColumn("  [dim]初始化中...[/dim]"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("加载中", total=100)
+        for i in range(0, 101, 5):
+            progress.update(task, completed=i)
+            time.sleep(0.02)
+        progress.update(task, completed=100)
 
-    return AgentMode(mode_type=ModeType.NORMAL)
+    return True
 
 
 def main():
@@ -581,18 +546,13 @@ def main():
         workspace_dir = Path.cwd()
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
-    # 确定模式
-    if args.mode:
-        # 命令行参数直接指定模式，跳过 UI
-        mode = create_mode_from_string(args.mode)
-    elif args.task:
-        # 非交互任务模式，跳过 UI
-        mode = AgentMode(mode_type=ModeType.NORMAL)
+    # 非交互任务模式，跳过 UI
+    if args.task:
+        asyncio.run(run_agent(workspace_dir, task=args.task))
     else:
-        # 正常交互模式：先运行 TypeScript 启动 UI
-        mode = run_typescript_ui()
-
-    asyncio.run(run_agent(workspace_dir, task=args.task, mode=mode))
+        # 正常交互模式：先运行 Python 启动 UI
+        run_python_ui()
+        asyncio.run(run_agent(workspace_dir))
 
 
 if __name__ == "__main__":

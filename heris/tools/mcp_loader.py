@@ -379,7 +379,6 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
         # Connect to each enabled server
         for server_name, server_config in mcp_servers.items():
             if server_config.get("disabled", False):
-                print(f"Skipping disabled server: {server_name}")
                 continue
 
             conn_type = _determine_connection_type(server_config)
@@ -412,8 +411,6 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
             if success:
                 _mcp_connections.append(connection)
                 all_tools.extend(connection.tools)
-
-        print(f"\nTotal MCP tools loaded: {len(all_tools)}")
 
         return all_tools
 
