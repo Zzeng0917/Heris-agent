@@ -405,6 +405,7 @@ class AnthropicClient(LLMClientBase):
                     is_complete=True,
                     usage=usage,
                 )
+                return  # Terminate generator after completion
 
             elif event.type == "message":
                 # Sometimes usage comes in a message event at the end

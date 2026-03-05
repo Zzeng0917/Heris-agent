@@ -8,6 +8,9 @@ from time import perf_counter
 from typing import Optional
 
 import tiktoken
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 
 from .llm import LLMClient
 from .logger import AgentLogger
@@ -15,30 +18,36 @@ from .schema import Message, StreamChunk
 from .tools.base import Tool, ToolResult
 
 
-# ANSI color codes - simplified theme matching cli.py
+# ANSI color codes - Gemini CLI inspired theme
 class Colors:
-    """Terminal color definitions - simplified theme"""
+    """Terminal color definitions - Gemini CLI inspired"""
 
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
 
-    # 品牌色
-    BRAND = "\033[33m"
-    BRIGHT_BRAND = "\033[93m"
+    # Brand colors
+    BRAND = "\033[38;2;66;133;244m"
+    BRIGHT_BRAND = "\033[38;2;91;160;255m"
 
-    # 语义化颜色
-    PRIMARY = "\033[36m"      # 青色
-    SECONDARY = "\033[90m"    # 灰色
-    SUCCESS = "\033[32m"      # 绿色
-    ERROR = "\033[31m"        # 红色
-    WARNING = "\033[33m"      # 黄色
+    # Semantic colors
+    PRIMARY = "\033[96m"
+    SECONDARY = "\033[90m"
+    SUCCESS = "\033[32m"
+    ERROR = "\033[31m"
+    WARNING = "\033[33m"
 
-    # 角色颜色
-    ASSISTANT = "\033[36m"    # 青色
-    TOOL = "\033[35m"         # 洋红
+    # Role colors
+    USER = "\033[37m"
+    ASSISTANT = "\033[96m"
+    TOOL = "\033[35m"
 
-    # 兼容性别名
+    # UI symbols
+    ASSISTANT_ICON = "◆"
+    TOOL_ICON = "✓"
+    USER_ICON = ">"
+
+    # Compatibility aliases
     BRIGHT_CYAN = "\033[96m"
     BRIGHT_GREEN = "\033[92m"
     BRIGHT_RED = "\033[91m"
@@ -374,6 +383,7 @@ Requirements:
 
             # Track display state
             has_started = False
+            thinking_displayed = False  # Track if thinking has been displayed
 
             # Buffer for smooth streaming
             buffer = []
@@ -388,16 +398,30 @@ Requirements:
                     if self._check_cancelled():
                         break
 
-                    # Handle thinking content - accumulate but don't display
+                    # Handle thinking content - accumulate but don't display yet
                     if chunk.thinking:
                         thinking_parts.append(chunk.thinking)
 
                     # Handle text content - stream with buffering for smoothness
                     elif chunk.content:
+                        # Before first content, display thinking if available
                         if not has_started:
-                            # First content: print prefix like Kode's BLACK_CIRCLE
                             has_started = True
-                            print(f"\n{Colors.PRIMARY}●{Colors.RESET} ", end="", flush=True)
+                            # Display accumulated thinking first (collapsible style)
+                            if thinking_parts and not thinking_displayed:
+                                full_thinking = "".join(thinking_parts)
+                                if full_thinking.strip():
+                                    try:
+                                        console = Console()
+                                        # Show thinking count only, not full content
+                                        thinking_lines = full_thinking.strip().split('\n')
+                                        thinking_summary = f"{len(thinking_lines)} lines"
+                                        console.print(f"[dim]Thinking... ({thinking_summary})[/dim]")
+                                    except Exception:
+                                        pass
+                                thinking_displayed = True
+                            # Print assistant prefix (Gemini CLI style: ◆)
+                            print(f"\n{Colors.ASSISTANT}{Colors.ASSISTANT_ICON}{Colors.RESET} ", end="", flush=True)
 
                         # Add to buffer
                         buffer.append(chunk.content)
@@ -491,14 +515,14 @@ Requirements:
                 print(f"\n{Colors.WARNING}  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
-            # Execute tool calls - Kode style display
+            # Execute tool calls - Gemini CLI style display
             for tool_call in tool_calls:
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
                 arguments = tool_call.function.arguments
 
-                # Kode style: tool name with dot prefix, inline with params
-                print(f"\n{Colors.TOOL}· {function_name}{Colors.RESET}", end="", flush=True)
+                # Gemini CLI style: ✓ ToolName with params
+                print(f"\n{Colors.SUCCESS}{Colors.TOOL_ICON}{Colors.RESET} {Colors.TOOL}{function_name}{Colors.RESET}", end="", flush=True)
 
                 # Execute tool
                 if function_name not in self.tools:
@@ -530,17 +554,17 @@ Requirements:
                     result_error=result.error if not result.success else None,
                 )
 
-                # Kode style: result with ⎿ prefix on next line
+                # Gemini CLI style: result indented on next line
                 if result.success:
                     result_text = result.content.replace("\n", " ")
                     if len(result_text) > 60:
                         result_text = result_text[:60] + "..."
-                    print(f"\n{Colors.SUCCESS}  ⎿ {result_text}{Colors.RESET}")
+                    print(f"\n{Colors.SECONDARY}  {result_text}{Colors.RESET}")
                 else:
                     error_text = result.error.replace("\n", " ") if result.error else "错误"
                     if len(error_text) > 60:
                         error_text = error_text[:60] + "..."
-                    print(f"\n{Colors.ERROR}  ⎿ {error_text}{Colors.RESET}")
+                    print(f"\n{Colors.ERROR}  ✗ {error_text}{Colors.RESET}")
 
                 # Add tool result message
                 tool_msg = Message(
