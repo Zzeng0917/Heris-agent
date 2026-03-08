@@ -1,5 +1,6 @@
 """Base tool classes."""
 
+from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel
@@ -15,6 +16,11 @@ class ToolResult(BaseModel):
 
 class Tool:
     """Base class for all tools."""
+
+    def __init__(self):
+        # Instance-level cache for tool schemas to avoid regeneration
+        self._schema_cache: dict[str, Any] | None = None
+        self._openai_schema_cache: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -36,20 +42,24 @@ class Tool:
         raise NotImplementedError
 
     def to_schema(self) -> dict[str, Any]:
-        """Convert tool to Anthropic tool schema."""
-        return {
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.parameters,
-        }
-
-    def to_openai_schema(self) -> dict[str, Any]:
-        """Convert tool to OpenAI tool schema."""
-        return {
-            "type": "function",
-            "function": {
+        """Convert tool to Anthropic tool schema (cached)."""
+        if self._schema_cache is None:
+            self._schema_cache = {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
-            },
-        }
+                "input_schema": self.parameters,
+            }
+        return self._schema_cache
+
+    def to_openai_schema(self) -> dict[str, Any]:
+        """Convert tool to OpenAI tool schema (cached)."""
+        if self._openai_schema_cache is None:
+            self._openai_schema_cache = {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": self.parameters,
+                },
+            }
+        return self._openai_schema_cache

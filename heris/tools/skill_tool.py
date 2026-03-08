@@ -14,6 +14,7 @@ class GetSkillTool(Tool):
     """Tool to get detailed information about a specific skill"""
 
     def __init__(self, skill_loader: SkillLoader):
+        super().__init__()  # Initialize schema cache
         self.skill_loader = skill_loader
 
     @property

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from heris.agent import Agent
+from heris.agents import Agent
 
 
 class TestAgentUpdatePersona:

@@ -68,6 +68,7 @@ class MCPTool(Tool):
         session: ClientSession,
         execute_timeout: float | None = None,
     ):
+        super().__init__()  # Initialize schema cache
         self._name = name
         self._description = description
         self._parameters = parameters

@@ -31,7 +31,7 @@ from acp import (
 from pydantic import field_validator
 from acp.schema import AgentCapabilities, Implementation, McpCapabilities
 
-from heris.agent import Agent
+from heris.agents import Agent
 from heris.cli import add_workspace_tools, initialize_base_tools
 from heris.config import Config
 from heris.llm import LLMClient

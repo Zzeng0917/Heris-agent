@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from heris import LLMClient
-from heris.agent import Agent
+from heris.agents import Agent
 from heris.config import Config
 from heris.tools import BashTool, EditTool, ReadTool, WriteTool
 

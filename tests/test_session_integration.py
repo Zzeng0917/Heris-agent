@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from heris import LLMClient
-from heris.agent import Agent
+from heris.agents import Agent
 from heris.schema import LLMResponse, Message
 from heris.tools.bash_tool import BashTool
 from heris.tools.file_tools import ReadTool, WriteTool

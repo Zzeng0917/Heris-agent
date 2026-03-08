@@ -24,7 +24,7 @@ from prompt_toolkit.shortcuts import message_dialog, input_dialog
 from prompt_toolkit.application import get_app
 
 from heris import LLMClient
-from heris.agent import Agent
+from heris.agents import Agent
 from heris.config import Config
 from heris.schema import LLMProvider
 from heris.tools.base import Tool
@@ -33,6 +33,7 @@ from heris.tools.file_tools import EditTool, ReadTool, WriteTool
 from heris.tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
 from heris.tools.note_tool import SessionNoteTool
 from heris.tools.skill_tool import create_skill_tools
+from heris.commands import cost_command
 
 
 # Slash command definitions for interactive picker - organized by category
@@ -58,6 +59,7 @@ SLASH_COMMANDS = [
     ("/chat list", "List saved conversations", "session", "📜"),
     ("/history", "Show message count", "session", "📊"),
     ("/stats", "Show session statistics", "session", "📈"),
+    ("/cost", "Show API token usage and costs", "session", "💰"),
     ("/log", "View log directory", "session", "📝"),
 ]
 
@@ -1531,16 +1533,75 @@ async def run_agent(workspace_dir: Path, task: str = None):
                     print_help()
 
                 elif command == "/clear":
-                    old_count = len(agent.messages)
-                    agent.messages = [agent.messages[0]]
                     from rich.console import Console
-                    Console().print("[dim]Cleared {} messages[/dim]\n".format(old_count - 1))
+                    from rich.panel import Panel
+                    from rich import box
+
+                    console = Console()
+
+                    # Check if there's anything to clear
+                    if len(agent.messages) <= 1:
+                        console.print(Panel(
+                            "[dim]No conversation history to clear.[/dim]",
+                            border_style="bright_black",
+                            box=box.ROUNDED
+                        ))
+                        console.print()
+                        continue
+
+                    old_count = len(agent.messages)
+                    user_messages = old_count - 1  # Exclude system message
+
+                    # Show warning and ask for confirmation
+                    console.print()
+                    console.print(Panel(
+                        f"[bold yellow]⚠️  Warning[/bold yellow]\n\n"
+                        f"You are about to clear [bold]{user_messages}[/bold] messages from the conversation history.\n"
+                        f"[red]This action cannot be undone.[/red]",
+                        title="[bold]Clear Conversation[/bold]",
+                        border_style="yellow",
+                        box=box.DOUBLE
+                    ))
+
+                    try:
+                        response = console.input("Continue? ([yes]/no): ").strip().lower()
+                    except KeyboardInterrupt:
+                        console.print("\n[dim]Cancelled.[/dim]\n")
+                        continue
+
+                    if response in ("yes", "y", ""):
+                        agent.messages = [agent.messages[0]]
+
+                        # Clear the terminal screen
+                        import os
+                        os.system('cls' if os.name == 'nt' else 'clear')
+
+                        # Print success message at the top
+                        console.print()
+                        console.print(Panel(
+                            f"[green]✓[/green] Cleared {user_messages} messages. Starting fresh conversation.",
+                            border_style="green",
+                            box=box.ROUNDED
+                        ))
+                        console.print()
+                    else:
+                        console.print(Panel(
+                            "[dim]Operation cancelled. Conversation history preserved.[/dim]",
+                            border_style="bright_black",
+                            box=box.ROUNDED
+                        ))
+                        console.print()
 
                 elif command == "/history":
                     print(f"\n{Colors.SECONDARY}  当前消息数: {len(agent.messages)}{Colors.RESET}\n")
 
                 elif command == "/stats":
                     print_stats(agent, session_start)
+
+                elif command == "/cost":
+                    from rich.console import Console
+                    console = Console()
+                    cost_command(agent, console, session_start)
 
                 elif command == "/log" or command.startswith("/log "):
                     parts2 = user_input.split(maxsplit=1)

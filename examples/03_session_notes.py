@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from heris import LLMClient
-from heris.agent import Agent
+from heris.agents import Agent
 from heris.config import Config
 from heris.tools import BashTool, ReadTool, WriteTool
 from heris.tools.note_tool import RecallNoteTool, SessionNoteTool

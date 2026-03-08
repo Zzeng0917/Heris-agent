@@ -34,6 +34,7 @@ class SessionNoteTool(Tool):
         Args:
             memory_file: Path to the note storage file
         """
+        super().__init__()  # Initialize schema cache
         self.memory_file = Path(memory_file)
         # Lazy loading: file and directory are only created when first note is recorded
 
@@ -134,6 +135,7 @@ class RecallNoteTool(Tool):
         Args:
             memory_file: Path to the note storage file
         """
+        super().__init__()  # Initialize schema cache
         self.memory_file = Path(memory_file)
 
     @property

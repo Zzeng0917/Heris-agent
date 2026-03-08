@@ -1,6 +1,6 @@
 """Heris - Minimal single agent with basic tools and MCP support."""
 
-from .agent import Agent
+from .agents import Agent
 from .llm import LLMClient
 from .schema import FunctionCall, LLMProvider, LLMResponse, Message, ToolCall
 

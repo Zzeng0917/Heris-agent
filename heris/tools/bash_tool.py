@@ -230,6 +230,7 @@ class BashTool(Tool):
                            If provided, all commands run in this directory.
                            If None, commands run in the process's cwd.
         """
+        super().__init__()  # Initialize schema cache
         self.is_windows = platform.system() == "Windows"
         self.shell_name = "PowerShell" if self.is_windows else "bash"
         self.workspace_dir = workspace_dir

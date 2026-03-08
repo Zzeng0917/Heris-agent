@@ -69,6 +69,7 @@ class ReadTool(Tool):
         Args:
             workspace_dir: Base directory for resolving relative paths
         """
+        super().__init__()  # Initialize schema cache
         self.workspace_dir = Path(workspace_dir).absolute()
 
     @property
@@ -161,6 +162,7 @@ class WriteTool(Tool):
         Args:
             workspace_dir: Base directory for resolving relative paths
         """
+        super().__init__()  # Initialize schema cache
         self.workspace_dir = Path(workspace_dir).absolute()
 
     @property
@@ -218,6 +220,7 @@ class EditTool(Tool):
         Args:
             workspace_dir: Base directory for resolving relative paths
         """
+        super().__init__()  # Initialize schema cache
         self.workspace_dir = Path(workspace_dir).absolute()
 
     @property

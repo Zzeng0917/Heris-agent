@@ -12,10 +12,10 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from .llm import LLMClient
-from .logger import AgentLogger
-from .schema import Message, StreamChunk
-from .tools.base import Tool, ToolResult
+from ..llm import LLMClient
+from ..logger import AgentLogger
+from ..schema import Message, StreamChunk
+from ..tools.base import Tool, ToolResult
 
 
 # ANSI color codes - Gemini CLI inspired theme
@@ -385,12 +385,17 @@ Requirements:
             has_started = False
             thinking_displayed = False  # Track if thinking has been displayed
 
-            # Buffer for smooth streaming
+            # Buffer for smooth streaming - optimized for better FPS and user experience
             buffer = []
-            buffer_len = 0
+            buffer_chars = 0
             last_flush_time = perf_counter()
+            # Optimized parameters for smoother output:
+            # - Larger buffer to reduce system calls while maintaining responsiveness
+            # - Lower FPS target (30fps) to match typical terminal refresh rates
             BUFFER_SIZE = 12  # Characters to buffer before flushing
-            FLUSH_INTERVAL = 0.02  # Max seconds between flushes (20ms)
+            FLUSH_INTERVAL = 0.033  # Max seconds between flushes (~30 fps)
+            # Natural break characters that trigger immediate flush for readability
+            BREAK_CHARS = frozenset('.!?。！？\n')
 
             try:
                 async for chunk in self.llm.generate_stream(messages=self.messages, tools=tool_list):
@@ -420,20 +425,21 @@ Requirements:
                                     except Exception:
                                         pass
                                 thinking_displayed = True
-                            # Print assistant prefix (Gemini CLI style: ◆)
                             print(f"\n{Colors.ASSISTANT}{Colors.ASSISTANT_ICON}{Colors.RESET} ", end="", flush=True)
 
                         # Add to buffer
                         buffer.append(chunk.content)
-                        buffer_len += len(chunk.content)
+                        buffer_chars += len(chunk.content)
                         content_parts.append(chunk.content)
 
                         # Flush conditions: buffer full, interval exceeded, or natural break point
                         current_time = perf_counter()
+                        # Check for natural break points (end of sentence, punctuation)
+                        ends_with_break = chunk.content and chunk.content[-1] in BREAK_CHARS
                         should_flush = (
-                            buffer_len >= BUFFER_SIZE or
+                            buffer_chars >= BUFFER_SIZE or
                             (current_time - last_flush_time) >= FLUSH_INTERVAL or
-                            chunk.content.endswith(('. ', '! ', '? ', ', ', '：', '。', '\n'))
+                            ends_with_break
                         )
 
                         if should_flush:
@@ -442,7 +448,7 @@ Requirements:
                                 sys.stdout.write(text)
                                 sys.stdout.flush()
                                 buffer.clear()
-                                buffer_len = 0
+                                buffer_chars = 0
                                 last_flush_time = current_time
 
                     # Handle completion
@@ -458,7 +464,7 @@ Requirements:
 
             except Exception as e:
                 # Check if it's a retry exhausted error
-                from .retry import RetryExhaustedError
+                from ..retry import RetryExhaustedError
 
                 if isinstance(e, RetryExhaustedError):
                     error_msg = f"请求失败 ({e.attempts} 次重试)"
@@ -515,16 +521,19 @@ Requirements:
                 print(f"\n{Colors.WARNING}  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
-            # Execute tool calls - Gemini CLI style display
+            # Execute tool calls in parallel - Gemini CLI style display
+            # First, display all tool calls being initiated
             for tool_call in tool_calls:
+                function_name = tool_call.function.name
+                print(f"\n{Colors.SUCCESS}{Colors.TOOL_ICON}{Colors.RESET} {Colors.TOOL}{function_name}{Colors.RESET}", end="", flush=True)
+
+            # Define async helper to execute a single tool
+            async def execute_single_tool(tool_call) -> tuple[str, str, ToolResult]:
+                """Execute a single tool and return (tool_call_id, function_name, result)."""
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
                 arguments = tool_call.function.arguments
 
-                # Gemini CLI style: ✓ ToolName with params
-                print(f"\n{Colors.SUCCESS}{Colors.TOOL_ICON}{Colors.RESET} {Colors.TOOL}{function_name}{Colors.RESET}", end="", flush=True)
-
-                # Execute tool
                 if function_name not in self.tools:
                     result = ToolResult(
                         success=False,
@@ -545,6 +554,28 @@ Requirements:
                             error=f"执行失败: {error_detail}\n\n{error_trace}",
                         )
 
+                return tool_call_id, function_name, arguments, result
+
+            # Execute all tools in parallel
+            tool_tasks = [execute_single_tool(tc) for tc in tool_calls]
+            tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+
+            # Process results and add to messages
+            for i, tool_result in enumerate(tool_results):
+                if isinstance(tool_result, Exception):
+                    # Handle exception from gather
+                    tool_call = tool_calls[i]
+                    tool_call_id = tool_call.id
+                    function_name = tool_call.function.name
+                    arguments = tool_call.function.arguments
+                    result = ToolResult(
+                        success=False,
+                        content="",
+                        error=f"工具执行异常: {str(tool_result)}",
+                    )
+                else:
+                    tool_call_id, function_name, arguments, result = tool_result
+
                 # Log tool execution result
                 self.logger.log_tool_result(
                     tool_name=function_name,
@@ -554,7 +585,7 @@ Requirements:
                     result_error=result.error if not result.success else None,
                 )
 
-                # Gemini CLI style: result indented on next line
+                # Display result indented on next line
                 if result.success:
                     result_text = result.content.replace("\n", " ")
                     if len(result_text) > 60:
@@ -575,7 +606,7 @@ Requirements:
                 )
                 self.messages.append(tool_msg)
 
-                # Check for cancellation after each tool execution
+                # Check for cancellation
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
                     cancel_msg = "已取消"
