@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from heris.tools.bash_tool import BackgroundShellManager, BashKillTool, BashOutputTool, BashTool
+from heris.tools.shell import BackgroundShellManager, BashKillTool, BashOutputTool, BashTool
 
 
 @pytest.mark.asyncio

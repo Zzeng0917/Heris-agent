@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
-from .base import Tool, ToolResult
+from ..base import Tool, ToolResult
 
 
 class BashOutputResult(ToolResult):

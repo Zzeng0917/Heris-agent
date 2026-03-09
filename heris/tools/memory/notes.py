@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .base import Tool, ToolResult
+from ..base import Tool, ToolResult
 
 
 class SessionNoteTool(Tool):
@@ -69,12 +69,12 @@ class SessionNoteTool(Tool):
 
     def _load_from_file(self) -> list:
         """Load notes from file.
-        
+
         Returns empty list if file doesn't exist (lazy loading).
         """
         if not self.memory_file.exists():
             return []
-        
+
         try:
             return json.loads(self.memory_file.read_text())
         except Exception:
@@ -82,7 +82,7 @@ class SessionNoteTool(Tool):
 
     def _save_to_file(self, notes: list):
         """Save notes to file.
-        
+
         Creates parent directory and file if they don't exist (lazy initialization).
         """
         # Ensure parent directory exists when actually saving

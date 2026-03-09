@@ -15,7 +15,7 @@ from heris import LLMClient
 from heris.agents import Agent
 from heris.config import Config
 from heris.tools import BashTool, ReadTool, WriteTool
-from heris.tools.note_tool import RecallNoteTool, SessionNoteTool
+from heris.tools.memory import RecallNoteTool, SessionNoteTool
 
 
 async def demo_direct_note_usage():

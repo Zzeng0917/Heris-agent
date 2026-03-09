@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from heris.tools.skill_loader import SkillLoader
+from heris.tools.skill import SkillLoader
 
 
 def test_markdown_link_processing():

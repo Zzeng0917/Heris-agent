@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from heris.tools.mcp_loader import (
+from heris.tools.mcp.loader import (
     MCPServerConnection,
     MCPTimeoutConfig,
     _determine_connection_type,

@@ -1,5 +1,4 @@
-"""
-Skill Loader - Load Claude Skills
+"""Skill Loader - Load and manage Skills.
 
 Supports loading skills from SKILL.md files and providing them to Agent
 """

@@ -1,13 +1,12 @@
-"""
-Skill Tool - Tool for Agent to load Skills on-demand
+"""Skill Tool - Tool for Agent to load Skills on-demand.
 
 Implements Progressive Disclosure (Level 2): Load full skill content when needed
 """
 
 from typing import Any, Dict, List, Optional
 
-from .base import Tool, ToolResult
-from .skill_loader import SkillLoader
+from ..base import Tool, ToolResult
+from .loader import SkillLoader
 
 
 class GetSkillTool(Tool):
@@ -62,7 +61,7 @@ def create_skill_tools(
     Create skill tool for Progressive Disclosure
 
     Only provides get_skill tool - the agent uses metadata in system prompt
-    to know what skills are available, then loads them on-demand.
+to know what skills are available, then loads them on-demand.
 
     Args:
         skills_dir: Skills directory path

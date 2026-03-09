@@ -28,11 +28,11 @@ from heris.agents import Agent
 from heris.config import Config
 from heris.schema import LLMProvider
 from heris.tools.base import Tool
-from heris.tools.bash_tool import BashKillTool, BashOutputTool, BashTool
-from heris.tools.file_tools import EditTool, ReadTool, WriteTool
-from heris.tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
-from heris.tools.note_tool import SessionNoteTool
-from heris.tools.skill_tool import create_skill_tools
+from heris.tools.shell import BashKillTool, BashOutputTool, BashTool
+from heris.tools.file import EditTool, ReadTool, WriteTool
+from heris.tools.mcp import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
+from heris.tools.memory import SessionNoteTool
+from heris.tools.skill import create_skill_tools
 from heris.commands import cost_command
 
 

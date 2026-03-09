@@ -17,8 +17,8 @@ from heris import LLMClient
 from heris.agents import Agent
 from heris.config import Config
 from heris.tools import BashTool, EditTool, ReadTool, WriteTool
-from heris.tools.mcp_loader import load_mcp_tools_async
-from heris.tools.note_tool import RecallNoteTool, SessionNoteTool
+from heris.tools.mcp import load_mcp_tools_async
+from heris.tools.memory import RecallNoteTool, SessionNoteTool
 
 
 async def demo_full_agent():

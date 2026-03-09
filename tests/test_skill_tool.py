@@ -11,8 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from heris.tools.skill_loader import SkillLoader
-from heris.tools.skill_tool import GetSkillTool, create_skill_tools
+from heris.tools.skill import SkillLoader, GetSkillTool, create_skill_tools
 
 
 def create_test_skill(skill_dir: Path, name: str, description: str, content: str):

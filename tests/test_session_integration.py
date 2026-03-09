@@ -11,9 +11,9 @@ import pytest
 from heris import LLMClient
 from heris.agents import Agent
 from heris.schema import LLMResponse, Message
-from heris.tools.bash_tool import BashTool
-from heris.tools.file_tools import ReadTool, WriteTool
-from heris.tools.note_tool import RecallNoteTool, SessionNoteTool
+from heris.tools.shell import BashTool
+from heris.tools.file import ReadTool, WriteTool
+from heris.tools.memory import RecallNoteTool, SessionNoteTool
 
 
 @pytest.fixture

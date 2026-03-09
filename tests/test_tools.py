@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from heris.tools import BashTool, EditTool, ReadTool, WriteTool
+from heris.tools import BashTool
+from heris.tools.file import EditTool, ReadTool, WriteTool
 
 
 @pytest.mark.asyncio

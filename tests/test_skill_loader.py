@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from heris.tools.skill_loader import Skill, SkillLoader
+from heris.tools.skill import Skill, SkillLoader
 
 
 def create_test_skill(skill_dir: Path, name: str, description: str, content: str):

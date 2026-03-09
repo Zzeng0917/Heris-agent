@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from heris.tools.note_tool import RecallNoteTool, SessionNoteTool
+from heris.tools.memory import RecallNoteTool, SessionNoteTool
 
 
 @pytest.mark.asyncio
