@@ -16,7 +16,7 @@ class EditTool(Tool):
             workspace_dir: Base directory for resolving relative paths
         """
         super().__init__()  # Initialize schema cache
-        self.workspace_dir = Path(workspace_dir).absolute()
+        self.workspace_dir = Path(workspace_dir).resolve()
 
     @property
     def name(self) -> str:
@@ -54,10 +54,30 @@ class EditTool(Tool):
     async def execute(self, path: str, old_str: str, new_str: str) -> ToolResult:
         """Execute edit file."""
         try:
+            # 防止目录遍历攻击
+            if ".." in Path(path).parts:
+                return ToolResult(
+                    success=False,
+                    content="",
+                    error=f"Path {path} traversal not allowed",
+                )
+
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():
                 file_path = self.workspace_dir / file_path
+
+            # 展开所有 .. 和符号链接，确保最终路径在沙箱内
+            file_path = file_path.resolve()
+
+            try:
+                file_path.relative_to(self.workspace_dir)
+            except ValueError:
+                return ToolResult(
+                    success=False,
+                    content="",
+                    error=f"Path {path} is not within the workspace directory",
+                )
 
             if not file_path.exists():
                 return ToolResult(

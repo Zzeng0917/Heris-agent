@@ -16,7 +16,7 @@ class WriteTool(Tool):
             workspace_dir: Base directory for resolving relative paths
         """
         super().__init__()  # Initialize schema cache
-        self.workspace_dir = Path(workspace_dir).absolute()
+        self.workspace_dir = Path(workspace_dir).resolve()
 
     @property
     def name(self) -> str:
@@ -50,15 +50,26 @@ class WriteTool(Tool):
     async def execute(self, path: str, content: str) -> ToolResult:
         """Execute write file."""
         try:
-            file_path = Path(path)
-            # Resolve relative paths relative to workspace_dir
-            if not file_path.is_absolute():
-                file_path = self.workspace_dir / file_path
+            # 防止目录遍历攻击
+            if ".." in Path(path).parts:
+                return ToolResult(success=False, content="", error=f"Path {path} traversal not allowed")
 
-            # Create parent directories if they don't exist
-            file_path.parent.mkdir(parents=True, exist_ok=True)
+            # 基础路径拼接
+            target = self.workspace_dir / path
 
-            file_path.write_text(content, encoding="utf-8")
-            return ToolResult(success=True, content=f"Successfully wrote to {file_path}")
+            # 展开所有 .. 和 符号链接
+            target = target.resolve()
+
+            # 确保最终路径在沙箱内
+            try:
+                target.relative_to(self.workspace_dir)
+            except ValueError:
+                return ToolResult(success=False, content="", error=f"Path {path} is not within the workspace directory")
+
+            #写入
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            return ToolResult(success=True, content=f"Successfully wrote to {target}")
+
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
