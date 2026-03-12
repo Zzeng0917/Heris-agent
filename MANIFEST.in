@@ -2,4 +2,5 @@ recursive-include heris/skills *
 include heris/skills/README.md
 include heris/skills/THIRD_PARTY_NOTICES.md
 include heris/skills/agent_skills_spec.md
+recursive-include heris/config *
 

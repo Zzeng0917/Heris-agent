@@ -43,7 +43,7 @@ class Tool:
 
     def to_schema(self) -> dict[str, Any]:
         """Convert tool to Anthropic tool schema (cached)."""
-        if self._schema_cache is None:
+        if getattr(self, '_schema_cache', None) is None:
             self._schema_cache = {
                 "name": self.name,
                 "description": self.description,
@@ -53,7 +53,7 @@ class Tool:
 
     def to_openai_schema(self) -> dict[str, Any]:
         """Convert tool to OpenAI tool schema (cached)."""
-        if self._openai_schema_cache is None:
+        if getattr(self, '_openai_schema_cache', None) is None:
             self._openai_schema_cache = {
                 "type": "function",
                 "function": {
