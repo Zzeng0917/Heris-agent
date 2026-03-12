@@ -62,6 +62,9 @@ class ToolsConfig(BaseModel):
     mcp_config_path: str = "mcp.json"
     mcp: MCPConfig = Field(default_factory=MCPConfig)
 
+    # Subagent
+    enable_subagent: bool = True
+
 
 class Config(BaseModel):
     """Main configuration class"""
@@ -155,6 +158,7 @@ class Config(BaseModel):
             enable_mcp=tools_data.get("enable_mcp", True),
             mcp_config_path=tools_data.get("mcp_config_path", "mcp.json"),
             mcp=mcp_config,
+            enable_subagent=tools_data.get("enable_subagent", True),
         )
 
         return cls(

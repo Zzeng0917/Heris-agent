@@ -34,6 +34,8 @@ from heris.tools.mcp import cleanup_mcp_connections, load_mcp_tools_async, set_m
 from heris.tools.memory import SessionNoteTool
 from heris.tools.skill import create_skill_tools
 from heris.commands import cost_command
+from heris.Todo import TodoManager, TodoTool
+from heris.subagent import SubagentTool, SubagentRegistry
 
 
 # Slash command definitions for interactive picker - organized by category
@@ -50,6 +52,7 @@ SLASH_COMMANDS = [
     # Tool commands
     ("/tools", "List available tools", "tools", "🛠️"),
     ("/tools desc", "List tools with descriptions", "tools", "📖"),
+    ("/agents", "List available subagents", "tools", "🤖"),
     ("/mcp list", "List configured MCP servers", "tools", "🔌"),
     ("/mcp refresh", "Refresh MCP connections", "tools", "🔄"),
 
@@ -426,6 +429,38 @@ def print_tools(agent: Agent, show_descriptions: bool = False):
             table.add_row(f"  {name}")
 
     console.print(Panel(table, title="[bold]Available Tools[/bold]", border_style="bright_black", box=box.ROUNDED))
+    console.print()
+
+
+def print_agents(registry: SubagentRegistry | None = None):
+    """Print available subagents."""
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich import box
+    from heris.subagent import SubagentType
+
+    console = Console()
+
+    table = Table(show_header=True, header_style="bold cyan", box=box.ROUNDED, border_style="bright_black")
+    table.add_column("Name", style="magenta", width=20)
+    table.add_column("Type", style="yellow", width=12)
+    table.add_column("Description", style="white")
+
+    # Add built-in agents
+    for agent_type in SubagentType:
+        from heris.subagent import get_builtin_definition
+        defn = get_builtin_definition(agent_type)
+        table.add_row(defn.name, "built-in", defn.description[:60] + "..." if len(defn.description) > 60 else defn.description)
+
+    # Add custom agents from registry
+    if registry:
+        for defn in registry.list_all():
+            if not defn.is_builtin_type():
+                table.add_row(defn.name, "custom", defn.description[:60] + "..." if len(defn.description) > 60 else defn.description)
+
+    console.print(Panel(table, title="[bold]Available Subagents[/bold]", border_style="bright_black", box=box.ROUNDED))
+    console.print("[dim]Use spawn_subagent tool with agent_name to delegate tasks[/dim]")
     console.print()
 
 
@@ -1310,7 +1345,7 @@ async def initialize_base_tools(config: Config):
     return tools, skill_loader
 
 
-def add_workspace_tools(tools: List[Tool], config: Config, workspace_dir: Path):
+def add_workspace_tools(tools: List[Tool], config: Config, workspace_dir: Path, todo_manager: TodoManager = None):
     workspace_dir.mkdir(parents=True, exist_ok=True)
     if config.tools.enable_bash:
         tools.append(BashTool(workspace_dir=str(workspace_dir)))
@@ -1322,6 +1357,10 @@ def add_workspace_tools(tools: List[Tool], config: Config, workspace_dir: Path):
         ])
     if config.tools.enable_note:
         tools.append(SessionNoteTool(memory_file=str(workspace_dir / ".agent_memory.json")))
+    # Add TodoTool
+    if todo_manager is None:
+        todo_manager = TodoManager()
+    tools.append(TodoTool(todo_manager))
 
 
 async def _quiet_cleanup():
@@ -1374,7 +1413,25 @@ async def run_agent(workspace_dir: Path, task: str = None):
         llm_client.retry_callback = on_retry
 
     tools, skill_loader = await initialize_base_tools(config)
-    add_workspace_tools(tools, config, workspace_dir)
+    todo_manager = TodoManager()
+    add_workspace_tools(tools, config, workspace_dir, todo_manager)
+
+    # Add SubagentTool if enabled
+    if config.tools.enable_subagent:
+        subagent_tools = [t for t in tools if hasattr(t, 'workspace_dir') or hasattr(t, 'name')]
+
+        # Create subagent registry with project directory
+        subagent_registry = SubagentRegistry()
+        subagent_registry.set_project_directory(workspace_dir)
+        subagent_registry.discover()
+
+        subagent_tool = SubagentTool(
+            llm_client=llm_client,
+            tools=subagent_tools,
+            registry=subagent_registry,
+            default_workspace=str(workspace_dir),
+        )
+        tools.append(subagent_tool)
 
     system_prompt_path = Config.find_config_file(config.agent.system_prompt_path)
     if system_prompt_path and system_prompt_path.exists():
@@ -1486,6 +1543,9 @@ async def run_agent(workspace_dir: Path, task: str = None):
     )
 
     # 交互循环
+    conversation_round = 0
+    last_todo_call_round = 0
+
     while True:
         try:
             user_input = await session.prompt_async(
@@ -1619,6 +1679,9 @@ async def run_agent(workspace_dir: Path, task: str = None):
                     show_desc = subcommand in ["desc", "descriptions"]
                     print_tools(agent, show_descriptions=show_desc)
 
+                elif command == "/agents":
+                    print_agents(subagent_registry if config.tools.enable_subagent else None)
+
                 elif command == "/mcp":
                     if subcommand is None or subcommand in ["list", "ls"]:
                         # List MCP servers
@@ -1686,6 +1749,14 @@ async def run_agent(workspace_dir: Path, task: str = None):
                 print_stats(agent, session_start)
                 break
 
+            # Increment conversation round
+            conversation_round += 1
+
+            # Check if we should inject reminder (3+ rounds since last todo call)
+            rounds_since_todo = conversation_round - last_todo_call_round
+            if rounds_since_todo >= 3:
+                user_input = f"<reminder> Update your todos.</reminder>\n\n{user_input}"
+
             agent.add_user_message(user_input)
 
             cancel_event = asyncio.Event()
@@ -1745,6 +1816,15 @@ async def run_agent(workspace_dir: Path, task: str = None):
                 agent.cancel_event = None
                 esc_listener_stop.set()
                 esc_thread.join(timeout=0.2)
+
+            # Check if todo tool was called in this round
+            for msg in agent.messages:
+                if msg.role == "assistant" and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        if tc.function.name == "todo":
+                            last_todo_call_round = conversation_round
+                            todo_manager.mark_called(conversation_round)
+                            break
 
             print()
 
