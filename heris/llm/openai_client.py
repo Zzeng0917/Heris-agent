@@ -28,6 +28,7 @@ class OpenAIClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/v1",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        timeout: float | None = None,
     ):
         """Initialize OpenAI client.
 
@@ -36,13 +37,20 @@ class OpenAIClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax OpenAI endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            timeout: Request timeout in seconds (default: 180s)
         """
-        super().__init__(api_key, api_base, model, retry_config)
+        super().__init__(api_key, api_base, model, retry_config, timeout)
 
-        # Initialize OpenAI client
+        # Initialize OpenAI client with timeout
+        import httpx
+
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout, connect=30.0),
+        )
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
+            http_client=http_client,
         )
 
     async def _make_api_request(

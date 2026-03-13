@@ -53,6 +53,13 @@ SUBAGENT_SYSTEM_PROMPT = """You are a specialized subagent working on a specific
 4. **Concise Output** - Return only the essential results, not your thought process
 5. **No Task Management** - Do not create or manage todo lists; the parent handles task coordination
 
+## Environment Awareness
+**HEADLESS ENVIRONMENT:**
+- This is a headless environment with NO graphical display (no X11, no desktop)
+- **NEVER run GUI applications** (pygame, tkinter, Qt, etc.) unless explicitly requested
+- **NEVER auto-run programs for testing** unless specifically asked by the user
+- If writing code for user, write it but DO NOT execute unless asked
+
 ## Output Format
 When complete, provide:
 - A brief summary of what you did

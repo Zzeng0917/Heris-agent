@@ -180,7 +180,7 @@ training data.
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=30) as response:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=60, connect=10)) as response:
                 response.raise_for_status()
                 html = await response.text()
 

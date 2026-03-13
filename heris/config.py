@@ -3,6 +3,7 @@
 Provides unified configuration loading and management functionality
 """
 
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -26,15 +27,18 @@ class LLMConfig(BaseModel):
     api_base: str = "https://api.minimax.io"
     model: str = "MiniMax-M2.5"
     provider: str = "anthropic"  # "anthropic" or "openai"
+    timeout: float = 180.0  # Request timeout in seconds (default: 3 minutes)
     retry: RetryConfig = Field(default_factory=RetryConfig)
 
 
 class AgentConfig(BaseModel):
     """Agent configuration"""
 
-    max_steps: int = 50
+    max_steps: int = 20  # Reduced for faster completion (simple tasks need fewer steps)
     workspace_dir: str = "./workspace"
     system_prompt_path: str = "system_prompt.md"
+    token_limit: int = 50000  # Reduced to trigger summary less frequently
+    fast_mode: bool = False  # When True, use minimal system prompt and skip non-essential features
 
 
 class MCPConfig(BaseModel):
@@ -73,13 +77,25 @@ class Config(BaseModel):
     agent: AgentConfig
     tools: ToolsConfig
 
+    # Class-level cache for loaded configurations
+    _config_cache: dict[str, "Config"] = {}
+
     @classmethod
     def load(cls) -> "Config":
-        """Load configuration from the default search path."""
+        """Load configuration from the default search path with caching."""
         config_path = cls.get_default_config_path()
         if not config_path.exists():
             raise FileNotFoundError("Configuration file not found. Run scripts/setup-config.sh or place config.yaml in heris/config/.")
-        return cls.from_yaml(config_path)
+
+        # Use cached config if available and file hasn't changed
+        cache_key = str(config_path)
+        if cache_key in cls._config_cache:
+            cached_config = cls._config_cache[cache_key]
+            return cached_config
+
+        config = cls.from_yaml(config_path)
+        cls._config_cache[cache_key] = config
+        return config
 
     @classmethod
     def from_yaml(cls, config_path: str | Path) -> "Config":
@@ -128,14 +144,18 @@ class Config(BaseModel):
             api_base=data.get("api_base", "https://api.minimax.io"),
             model=data.get("model", "MiniMax-M2.5"),
             provider=data.get("provider", "anthropic"),
+            timeout=data.get("timeout", 180.0),
             retry=retry_config,
         )
 
         # Parse Agent configuration
+        agent_data = data.get("agent", {})
         agent_config = AgentConfig(
-            max_steps=data.get("max_steps", 50),
-            workspace_dir=data.get("workspace_dir", "./workspace"),
-            system_prompt_path=data.get("system_prompt_path", "system_prompt.md"),
+            max_steps=agent_data.get("max_steps", 20),
+            workspace_dir=agent_data.get("workspace_dir", "./workspace"),
+            system_prompt_path=agent_data.get("system_prompt_path", "system_prompt.md"),
+            token_limit=agent_data.get("token_limit", 50000),
+            fast_mode=agent_data.get("fast_mode", False),
         )
 
         # Parse tools configuration

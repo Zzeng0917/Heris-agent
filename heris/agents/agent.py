@@ -9,13 +9,15 @@ from typing import Optional
 
 import tiktoken
 from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
+from rich.text import Text
+from rich import box
 
 from ..llm import LLMClient
 from ..logger import AgentLogger
 from ..schema import Message, StreamChunk
 from ..tools.base import Tool, ToolResult
+from ..tools.shell.bash import BackgroundShellManager
+from ..ui import StatusDisplay
 
 
 # ANSI color codes - Gemini CLI inspired theme
@@ -103,6 +105,16 @@ class Agent:
         # Flag to skip token check right after summary (avoid consecutive triggers)
         self._skip_next_token_check: bool = False
 
+        # Cache tiktoken encoder to avoid re-initialization on each call
+        try:
+            self._token_encoder = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            self._token_encoder = None
+
+        # Counter to reduce token check frequency (check every N steps)
+        self._step_counter: int = 0
+        self._token_check_interval: int = 3  # Check every 3 steps
+
     def add_user_message(self, content: str):
         """Add a user message to history."""
         self.messages.append(Message(role="user", content=content))
@@ -144,13 +156,11 @@ class Agent:
 
         Uses cl100k_base encoder (GPT-4/Claude/M2 compatible)
         """
-        try:
-            # Use cl100k_base encoder (used by GPT-4 and most modern models)
-            encoding = tiktoken.get_encoding("cl100k_base")
-        except Exception:
-            # Fallback: if tiktoken initialization fails, use simple estimation
+        # Use cached encoder if available, otherwise fallback
+        if self._token_encoder is None:
             return self._estimate_tokens_fallback()
 
+        encoding = self._token_encoder
         total_tokens = 0
 
         for msg in self.messages:
@@ -212,6 +222,11 @@ class Agent:
         # Skip check if we just completed a summary (wait for next LLM call to update api_total_tokens)
         if self._skip_next_token_check:
             self._skip_next_token_check = False
+            return
+
+        # Reduce token check frequency - only check every N steps
+        self._step_counter += 1
+        if self._step_counter % self._token_check_interval != 0:
             return
 
         estimated_tokens = self._estimate_tokens()
@@ -364,6 +379,22 @@ Requirements:
             # Check and summarize message history to prevent context overflow
             await self._summarize_messages()
 
+            # Drain background notifications and inject before LLM call (s08 pattern)
+            notifs = BackgroundShellManager.drain_notifications_sync()
+            if notifs:
+                notif_text = "\n".join(
+                    f"[bg:{n['task_id']}] {n['status']}: {n['result']}" for n in notifs
+                )
+                self.messages.append(Message(
+                    role="user",
+                    content=f"<background-results>\n{notif_text}\n</background-results>"
+                ))
+                self.messages.append(Message(
+                    role="assistant",
+                    content="Noted background results."
+                ))
+                print(f"\n{Colors.SECONDARY}[Background tasks completed: {len(notifs)}]{Colors.RESET}")
+
             # Step indicator - simplified, no box
             if step > 0:
                 print()
@@ -374,6 +405,9 @@ Requirements:
             # Log LLM request and call LLM with Tool objects directly
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
+            # Initialize status display for live updates
+            status_display = StatusDisplay()
+
             # Use streaming output - Kode style: direct streaming, no thinking indicator
             content_parts = []
             thinking_parts = []
@@ -383,7 +417,7 @@ Requirements:
 
             # Track display state
             has_started = False
-            thinking_displayed = False  # Track if thinking has been displayed
+            status_stopped = False  # Track if status display has been stopped
 
             # Buffer for smooth streaming - optimized for better FPS and user experience
             buffer = []
@@ -397,34 +431,60 @@ Requirements:
             # Natural break characters that trigger immediate flush for readability
             BREAK_CHARS = frozenset('.!?。！？\n')
 
+            # Start status display before LLM call
+            status_display.start("Thinking")
+
             try:
                 async for chunk in self.llm.generate_stream(messages=self.messages, tools=tool_list):
                     # Check for cancellation
                     if self._check_cancelled():
                         break
 
-                    # Handle thinking content - accumulate but don't display yet
+                    # Handle thinking content - accumulate and update status
                     if chunk.thinking:
                         thinking_parts.append(chunk.thinking)
+                        if not status_stopped:
+                            # Update status less frequently to avoid refresh overhead
+                            # Only update every ~500 chars to keep time display smooth
+                            if len(thinking_parts) % 50 == 0:
+                                status_display.update_status("Reasoning", "thinking")
+                                estimated_tokens = len(thinking_parts) * 10
+                                status_display.set_token_count(estimated_tokens)
 
                     # Handle text content - stream with buffering for smoothness
                     elif chunk.content:
-                        # Before first content, display thinking if available
+                        # Before first content, stop status display and show thinking
                         if not has_started:
                             has_started = True
-                            # Display accumulated thinking first (collapsible style)
-                            if thinking_parts and not thinking_displayed:
-                                full_thinking = "".join(thinking_parts)
-                                if full_thinking.strip():
-                                    try:
-                                        console = Console()
-                                        # Show thinking count only, not full content
-                                        thinking_lines = full_thinking.strip().split('\n')
-                                        thinking_summary = f"{len(thinking_lines)} lines"
-                                        console.print(f"[dim]Thinking... ({thinking_summary})[/dim]")
-                                    except Exception:
-                                        pass
-                                thinking_displayed = True
+                            # Stop status display before streaming content
+                            if not status_stopped:
+                                status_display.stop()
+                                status_stopped = True
+                            # Display accumulated thinking with subtle bottom highlight
+                            full_thinking = "".join(thinking_parts)
+                            if full_thinking.strip():
+                                try:
+                                    console = Console()
+                                    thinking_text = full_thinking.strip()
+                                    thinking_lines = thinking_text.split('\n')
+
+                                    # Truncate if too long (keep first 15 lines with indicator)
+                                    max_lines = 15
+                                    if len(thinking_lines) > max_lines:
+                                        displayed_text = '\n'.join(thinking_lines[:max_lines])
+                                        displayed_text += f"\n\n[dim]... ({len(thinking_lines) - max_lines} more lines) ...[/dim]"
+                                    else:
+                                        displayed_text = thinking_text
+
+                                    # Create thinking text with bottom highlight bar effect
+                                    thinking_render = Text()
+                                    thinking_render.append("Thinking\n", style="dim")
+                                    thinking_render.append(displayed_text, style="bright_black")
+                                    # Bottom highlight bar using Rich's box characters
+                                    console.print(thinking_render)
+                                    console.print("─" * min(60, console.width), style="bright_cyan")
+                                except Exception:
+                                    pass  # Silent fallback
                             print(f"\n{Colors.ASSISTANT}{Colors.ASSISTANT_ICON}{Colors.RESET} ", end="", flush=True)
 
                         # Add to buffer
@@ -462,7 +522,41 @@ Requirements:
                     sys.stdout.write("".join(buffer))
                     sys.stdout.flush()
 
+                # If we have thinking but no content was streamed, display thinking
+                if not has_started and thinking_parts:
+                    has_started = True
+                    if not status_stopped:
+                        status_display.stop()
+                        status_stopped = True
+                    full_thinking = "".join(thinking_parts)
+                    if full_thinking.strip():
+                        try:
+                            console = Console()
+                            thinking_text = full_thinking.strip()
+                            thinking_lines = thinking_text.split('\n')
+
+                            max_lines = 15
+                            if len(thinking_lines) > max_lines:
+                                displayed_text = '\n'.join(thinking_lines[:max_lines])
+                                displayed_text += f"\n\n[dim]... ({len(thinking_lines) - max_lines} more lines) ...[/dim]"
+                            else:
+                                displayed_text = thinking_text
+
+                            thinking_render = Text()
+                            thinking_render.append("Thinking\n", style="dim")
+                            thinking_render.append(displayed_text, style="bright_black")
+                            console.print(thinking_render)
+                            console.print("─" * min(60, console.width), style="bright_cyan")
+                        except Exception:
+                            pass
+                    print(f"\n{Colors.ASSISTANT}{Colors.ASSISTANT_ICON}{Colors.RESET} ", end="", flush=True)
+
             except Exception as e:
+                # Stop status display on error
+                if not status_stopped:
+                    status_display.stop()
+                    status_stopped = True
+
                 # Check if it's a retry exhausted error
                 from ..retry import RetryExhaustedError
 
@@ -521,14 +615,20 @@ Requirements:
                 print(f"\n{Colors.WARNING}  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
-            # Execute tool calls in parallel - Gemini CLI style display
-            # First, display all tool calls being initiated
+            # Execute tool calls with status display
+            # Start status display for tool execution
+            status_display.start("Running tools")
+            tool_call_infos = []
+
+            # Register all tool calls in status display
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
-                print(f"\n{Colors.SUCCESS}{Colors.TOOL_ICON}{Colors.RESET} {Colors.TOOL}{function_name}{Colors.RESET}", end="", flush=True)
+                arguments = tool_call.function.arguments
+                tool_info = status_display.add_tool_call(function_name, arguments)
+                tool_call_infos.append((tool_call, tool_info))
 
             # Define async helper to execute a single tool
-            async def execute_single_tool(tool_call) -> tuple[str, str, ToolResult]:
+            async def execute_single_tool(tool_call, tool_info) -> tuple[str, str, ToolResult]:
                 """Execute a single tool and return (tool_call_id, function_name, result)."""
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
@@ -540,10 +640,18 @@ Requirements:
                         content="",
                         error=f"未知工具: {function_name}",
                     )
+                    status_display.update_tool_call(tool_info, "error", "Unknown tool")
                 else:
                     try:
                         tool = self.tools[function_name]
                         result = await tool.execute(**arguments)
+                        # Update status with result preview
+                        if result.success:
+                            preview = result.content.replace("\n", " ")[:50]
+                            status_display.update_tool_call(tool_info, "completed", preview)
+                        else:
+                            preview = result.error.replace("\n", " ")[:50] if result.error else "Error"
+                            status_display.update_tool_call(tool_info, "error", preview)
                     except Exception as e:
                         import traceback
                         error_detail = f"{type(e).__name__}: {str(e)}"
@@ -553,12 +661,16 @@ Requirements:
                             content="",
                             error=f"执行失败: {error_detail}\n\n{error_trace}",
                         )
+                        status_display.update_tool_call(tool_info, "error", error_detail[:50])
 
                 return tool_call_id, function_name, arguments, result
 
             # Execute all tools in parallel
-            tool_tasks = [execute_single_tool(tc) for tc in tool_calls]
+            tool_tasks = [execute_single_tool(tc, ti) for tc, ti in tool_call_infos]
             tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+
+            # Stop status display after tools complete
+            status_display.stop()
 
             # Process results and add to messages
             for i, tool_result in enumerate(tool_results):
@@ -585,17 +697,19 @@ Requirements:
                     result_error=result.error if not result.success else None,
                 )
 
-                # Display result indented on next line
+                # Display result (Gemini CLI style)
                 if result.success:
                     result_text = result.content.replace("\n", " ")
                     if len(result_text) > 60:
                         result_text = result_text[:60] + "..."
-                    print(f"\n{Colors.SECONDARY}  {result_text}{Colors.RESET}")
+                    print(f"\n{Colors.SUCCESS}{Colors.TOOL_ICON}{Colors.RESET} {Colors.TOOL}{function_name}{Colors.RESET}")
+                    print(f"{Colors.SECONDARY}  {result_text}{Colors.RESET}")
                 else:
                     error_text = result.error.replace("\n", " ") if result.error else "错误"
                     if len(error_text) > 60:
                         error_text = error_text[:60] + "..."
-                    print(f"\n{Colors.ERROR}  ✗ {error_text}{Colors.RESET}")
+                    print(f"\n{Colors.ERROR}✗ {function_name}{Colors.RESET}")
+                    print(f"{Colors.ERROR}  {error_text}{Colors.RESET}")
 
                 # Add tool result message
                 tool_msg = Message(

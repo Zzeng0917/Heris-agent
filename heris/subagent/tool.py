@@ -83,12 +83,8 @@ class SubagentTool(Tool):
     @property
     def description(self) -> str:
         """Tool description."""
-        registry_hint = ""
-        if self.registry:
-            available = self.registry.list_names()
-            if available:
-                registry_hint = f"\n\nAvailable subagents: {', '.join(available)}"
-
+        # Note: Avoid calling list_names() here to prevent triggering discover() during init
+        # The available subagents are shown in the parameters schema instead
         return (
             "Spawn a specialized subagent to handle a specific task with isolated context. "
             "Use this when you need to:\n"
@@ -98,19 +94,15 @@ class SubagentTool(Tool):
             "4. Run a task that might require many tool calls\n"
             "5. Use specialized expertise (code review, debugging, planning)\n\n"
             "The subagent will have its own isolated workspace and context, "
-            "and will return a concise summary of results."
-            f"{registry_hint}"
+            "and will return a concise summary of results.\n\n"
+            "Use the /agents command to see available subagents."
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
         """Tool parameters schema."""
-        # Build agent_name enum if registry is available
-        agent_names = None
-        if self.registry:
-            available = self.registry.list_names()
-            if available:
-                agent_names = {"enum": available}
+        # Note: Avoid calling list_names() here to prevent triggering discover() during init
+        # The agent_name field uses built-in types as examples
 
         properties: dict[str, Any] = {
             "prompt": {
@@ -125,9 +117,8 @@ class SubagentTool(Tool):
                 "description": (
                     "Name of the subagent to spawn. "
                     "Built-in types: explore, plan, general-purpose, code-reviewer, debug. "
-                    "Or use a custom agent name from the registry."
+                    "Or use a custom agent name from the registry (use /agents to list)."
                 ),
-                **(agent_names or {}),
             },
             "max_steps": {
                 "type": "integer",

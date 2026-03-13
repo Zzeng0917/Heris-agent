@@ -4,9 +4,10 @@ Supports loading skills from SKILL.md files and providing them to Agent
 """
 
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, ClassVar
 
 import yaml
 
@@ -44,7 +45,11 @@ All files and references in this skill are relative to this directory.
 
 
 class SkillLoader:
-    """Skill loader"""
+    """Skill loader with caching support"""
+
+    # Class-level cache for skill directories
+    _cache: ClassVar[Dict[str, Dict[str, any]]] = {}
+    _cache_ttl: ClassVar[int] = 60  # Cache TTL in seconds
 
     def __init__(self, skills_dir: str = "./skills"):
         """
@@ -192,12 +197,22 @@ class SkillLoader:
 
     def discover_skills(self) -> List[Skill]:
         """
-        Discover and load all skills in the skills directory
+        Discover and load all skills in the skills directory with caching.
 
         Returns:
             List of Skills
         """
         skills = []
+        cache_key = str(self.skills_dir.resolve())
+
+        # Check if we have a valid cache entry
+        if cache_key in self._cache:
+            cached = self._cache[cache_key]
+            age = time.time() - cached["timestamp"]
+            if age < self._cache_ttl:
+                # Use cached skills
+                self.loaded_skills = cached["skills"]
+                return list(self.loaded_skills.values())
 
         if not self.skills_dir.exists():
             print(f"⚠️  Skills directory does not exist: {self.skills_dir}")
@@ -209,6 +224,12 @@ class SkillLoader:
             if skill:
                 skills.append(skill)
                 self.loaded_skills[skill.name] = skill
+
+        # Update cache
+        self._cache[cache_key] = {
+            "timestamp": time.time(),
+            "skills": self.loaded_skills.copy(),
+        }
 
         return skills
 

@@ -28,7 +28,7 @@ from heris.agents import Agent
 from heris.config import Config
 from heris.schema import LLMProvider
 from heris.tools.base import Tool
-from heris.tools.shell import BashKillTool, BashOutputTool, BashTool
+from heris.tools.shell import BackgroundCheckTool, BashKillTool, BashOutputTool, BashTool
 from heris.tools.file import EditTool, ReadTool, WriteTool
 from heris.tools.mcp import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
 from heris.tools.memory import SessionNoteTool
@@ -1303,8 +1303,10 @@ async def initialize_base_tools(config: Config):
     if config.tools.enable_bash:
         tools.append(BashOutputTool())
         tools.append(BashKillTool())
+        tools.append(BackgroundCheckTool())
 
-    if config.tools.enable_skills:
+    # Fast mode: skip skill tools to reduce startup time
+    if config.tools.enable_skills and not config.agent.fast_mode:
         try:
             skills_path = Path(config.tools.skills_dir).expanduser()
             if skills_path.is_absolute():
@@ -1326,7 +1328,8 @@ async def initialize_base_tools(config: Config):
         except Exception:
             pass
 
-    if config.tools.enable_mcp:
+    # Fast mode: skip MCP tools to reduce startup time
+    if config.tools.enable_mcp and not config.agent.fast_mode:
         try:
             mcp_config = config.tools.mcp
             set_mcp_timeout_config(
@@ -1408,6 +1411,7 @@ async def run_agent(workspace_dir: Path, task: str = None):
         api_base=config.llm.api_base,
         model=config.llm.model,
         retry_config=retry_config if config.llm.retry.enabled else None,
+        timeout=config.llm.timeout,
     )
     if config.llm.retry.enabled:
         llm_client.retry_callback = on_retry
@@ -1416,14 +1420,14 @@ async def run_agent(workspace_dir: Path, task: str = None):
     todo_manager = TodoManager()
     add_workspace_tools(tools, config, workspace_dir, todo_manager)
 
-    # Add SubagentTool if enabled
-    if config.tools.enable_subagent:
+    # Fast mode: skip subagent to reduce startup time
+    if config.tools.enable_subagent and not config.agent.fast_mode:
         subagent_tools = [t for t in tools if hasattr(t, 'workspace_dir') or hasattr(t, 'name')]
 
         # Create subagent registry with project directory
+        # Note: discover() is called lazily when first needed (in get/list methods)
         subagent_registry = SubagentRegistry()
         subagent_registry.set_project_directory(workspace_dir)
-        subagent_registry.discover()
 
         subagent_tool = SubagentTool(
             llm_client=llm_client,
@@ -1439,7 +1443,10 @@ async def run_agent(workspace_dir: Path, task: str = None):
     else:
         system_prompt = "You are Heris, an intelligent assistant."
 
-    if skill_loader:
+    # Fast mode: skip skills metadata to reduce token usage and startup time
+    if config.agent.fast_mode:
+        system_prompt = system_prompt.replace("{SKILLS_METADATA}", "")
+    elif skill_loader:
         skills_metadata = skill_loader.get_skills_metadata_prompt()
         system_prompt = system_prompt.replace("{SKILLS_METADATA}", skills_metadata or "")
     else:
@@ -1451,6 +1458,7 @@ async def run_agent(workspace_dir: Path, task: str = None):
         tools=tools,
         max_steps=config.agent.max_steps,
         workspace_dir=str(workspace_dir),
+        token_limit=config.agent.token_limit,
     )
 
     # 非交互模式

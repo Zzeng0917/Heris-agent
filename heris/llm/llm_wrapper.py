@@ -36,6 +36,9 @@ class LLMClient:
     # MiniMax API domains that need automatic suffix handling
     MINIMAX_DOMAINS = ("api.minimax.io", "api.minimaxi.com")
 
+    # Default timeout for API requests (in seconds)
+    DEFAULT_TIMEOUT = 180  # 3 minutes
+
     def __init__(
         self,
         api_key: str,
@@ -43,6 +46,7 @@ class LLMClient:
         api_base: str = "https://api.minimaxi.com",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        timeout: float | None = None,
     ):
         """Initialize LLM client with specified provider.
 
@@ -54,11 +58,13 @@ class LLMClient:
                      For third-party APIs (e.g., https://api.siliconflow.cn/v1), used as-is.
             model: Model name to use
             retry_config: Optional retry configuration
+            timeout: Request timeout in seconds (default: 180s)
         """
         self.provider = provider
         self.api_key = api_key
         self.model = model
         self.retry_config = retry_config or RetryConfig()
+        self.timeout = timeout or self.DEFAULT_TIMEOUT
 
         # Normalize api_base (remove trailing slash)
         api_base = api_base.rstrip("/")
@@ -90,6 +96,7 @@ class LLMClient:
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                timeout=self.timeout,
             )
         elif provider == LLMProvider.OPENAI:
             self._client = OpenAIClient(
@@ -97,6 +104,7 @@ class LLMClient:
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                timeout=self.timeout,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")

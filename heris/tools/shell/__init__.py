@@ -6,12 +6,21 @@ This module provides tools for executing shell commands:
 - BashKillTool: Terminate running background bash shells
 """
 
-from .bash import BackgroundShell, BackgroundShellManager, BashKillTool, BashOutputResult, BashOutputTool, BashTool
+from .bash import (
+    BackgroundCheckTool,
+    BackgroundShell,
+    BackgroundShellManager,
+    BashKillTool,
+    BashOutputResult,
+    BashOutputTool,
+    BashTool,
+)
 
 __all__ = [
     "BashTool",
     "BashOutputTool",
     "BashKillTool",
+    "BackgroundCheckTool",
     "BashOutputResult",
     "BackgroundShell",
     "BackgroundShellManager",

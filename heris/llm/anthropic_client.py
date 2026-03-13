@@ -27,6 +27,7 @@ class AnthropicClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/anthropic",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        timeout: float | None = None,
     ):
         """Initialize Anthropic client.
 
@@ -35,14 +36,21 @@ class AnthropicClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax Anthropic endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            timeout: Request timeout in seconds (default: 180s)
         """
-        super().__init__(api_key, api_base, model, retry_config)
+        super().__init__(api_key, api_base, model, retry_config, timeout)
 
-        # Initialize Anthropic async client
+        # Initialize Anthropic async client with timeout
+        import httpx
+
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.timeout, connect=30.0),
+        )
         self.client = anthropic.AsyncAnthropic(
             base_url=api_base,
             api_key=api_key,
             default_headers={"Authorization": f"Bearer {api_key}"},
+            http_client=http_client,
         )
 
     async def _make_api_request(

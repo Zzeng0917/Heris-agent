@@ -106,10 +106,46 @@ class BackgroundShell:
 
 
 class BackgroundShellManager:
-    """Manager for all background shell processes."""
+    """Manager for all background shell processes with notification queue.
+
+    Implements s08 pattern: notification queue is drained before each LLM call
+    to deliver background task completion results.
+    """
 
     _shells: dict[str, BackgroundShell] = {}
     _monitor_tasks: dict[str, asyncio.Task] = {}
+    _notification_queue: list[dict] = []  # Completed task notifications
+    _lock: asyncio.Lock = asyncio.Lock()  # Thread-safe lock for notifications
+
+    @classmethod
+    async def drain_notifications(cls) -> list[dict]:
+        """Return and clear all pending completion notifications.
+
+        This is called before each LLM call to inject background results.
+        Returns list of notifications with task_id, status, command, result.
+        """
+        async with cls._lock:
+            notifs = list(cls._notification_queue)
+            cls._notification_queue.clear()
+        return notifs
+
+    @classmethod
+    def drain_notifications_sync(cls) -> list[dict]:
+        """Synchronous version of drain_notifications for non-async contexts."""
+        notifs = list(cls._notification_queue)
+        cls._notification_queue.clear()
+        return notifs
+
+    @classmethod
+    async def _enqueue_notification(cls, bash_id: str, status: str, command: str, result: str):
+        """Add a notification to the queue when a task completes."""
+        async with cls._lock:
+            cls._notification_queue.append({
+                "task_id": bash_id,
+                "status": status,
+                "command": command[:80],
+                "result": result[:500],  # Limit result size
+            })
 
     @classmethod
     def add(cls, shell: BackgroundShell) -> None:
@@ -167,10 +203,27 @@ class BackgroundShellManager:
 
                 shell.update_status(is_alive=False, exit_code=returncode)
 
+                # Enqueue notification when task completes
+                output = "\n".join(shell.output_lines[-100:])  # Last 100 lines
+                status = "completed" if returncode == 0 else "failed"
+                await cls._enqueue_notification(
+                    bash_id=bash_id,
+                    status=status,
+                    command=shell.command,
+                    result=output or "(no output)"
+                )
+
             except Exception as e:
                 if bash_id in cls._shells:
                     cls._shells[bash_id].status = "error"
                     cls._shells[bash_id].add_output(f"Monitor error: {str(e)}")
+                # Enqueue error notification
+                await cls._enqueue_notification(
+                    bash_id=bash_id,
+                    status="error",
+                    command=shell.command if shell else "",
+                    result=f"Monitor error: {str(e)}"
+                )
             finally:
                 if bash_id in cls._monitor_tasks:
                     del cls._monitor_tasks[bash_id]
@@ -257,6 +310,11 @@ Tips:
   - Use absolute paths instead of cd when possible
   - For background commands, monitor with bash_output and terminate with bash_kill
 
+IMPORTANT - HEADLESS ENVIRONMENT:
+  - This environment has NO graphical display
+  - DO NOT run GUI applications unless user explicitly asks to run them
+  - DO NOT auto-run programs for testing unless specifically requested
+
 Examples:
   - git status
   - npm test
@@ -275,6 +333,12 @@ Tips:
   - Chain dependent commands with &&: git add . && git commit -m "msg"
   - Use absolute paths instead of cd when possible
   - For background commands, monitor with bash_output and terminate with bash_kill
+
+IMPORTANT - HEADLESS ENVIRONMENT:
+  - This environment has NO graphical display (no X11, no desktop)
+  - DO NOT run GUI applications (pygame, tkinter, Qt apps) unless user explicitly asks to run them
+  - DO NOT auto-run programs for testing unless specifically requested
+  - If writing code for user, write it but DO NOT execute unless asked
 
 Examples:
   - git status
@@ -530,6 +594,75 @@ class BashOutputTool(Tool):
                 stdout="",
                 stderr=str(e),
                 exit_code=-1,
+            )
+
+
+class BackgroundCheckTool(Tool):
+    """Check status of all background shell tasks."""
+
+    @property
+    def name(self) -> str:
+        return "background_check"
+
+    @property
+    def description(self) -> str:
+        return """Check the status of all background tasks (background bash shells).
+
+- Lists all running and completed background tasks
+- Shows task ID, status, command, and execution time
+- Use this to monitor long-running commands started with bash(run_in_background=true)
+- No parameters required
+
+Returns a table of all background tasks with their current status."""
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+
+    async def execute(self) -> ToolResult:
+        """Check status of all background tasks.
+
+        Returns:
+            ToolResult with formatted status of all background tasks.
+        """
+        try:
+            shell_ids = BackgroundShellManager.get_available_ids()
+
+            if not shell_ids:
+                return ToolResult(
+                    success=True,
+                    content="No background tasks running.",
+                )
+
+            lines = ["Background Tasks:", "-" * 60]
+            for bash_id in shell_ids:
+                shell = BackgroundShellManager.get(bash_id)
+                if shell:
+                    elapsed = time.time() - shell.start_time
+                    status_icon = {
+                        "running": "▶",
+                        "completed": "✓",
+                        "failed": "✗",
+                        "terminated": "■",
+                        "error": "⚠",
+                    }.get(shell.status, "?")
+
+                    cmd = shell.command[:50] + "..." if len(shell.command) > 50 else shell.command
+                    lines.append(f"{status_icon} {bash_id}: [{shell.status}] {elapsed:.1f}s - {cmd}")
+
+            return ToolResult(
+                success=True,
+                content="\n".join(lines),
+            )
+
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"Failed to check background tasks: {str(e)}",
             )
 
 
