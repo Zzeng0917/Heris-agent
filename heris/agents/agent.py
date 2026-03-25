@@ -242,46 +242,59 @@ class Agent:
             f"\n{Colors.WARNING}Token 使用率: {estimated_tokens}/{self.token_limit}，触发自动总结...{Colors.RESET}"
         )
 
-        # Find all user message indices (skip system prompt)
-        user_indices = [i for i, msg in enumerate(self.messages) if msg.role == "user" and i > 0]
+        # Start status display for summarization
+        from ..ui import StatusDisplay
+        status_display = StatusDisplay()
+        status_display.start("Summarizing conversation")
 
-        # Need at least 1 user message to perform summary
-        if len(user_indices) < 1:
-            print(f"{Colors.SECONDARY}  消息不足，无法总结{Colors.RESET}")
-            return
+        try:
+            # Find all user message indices (skip system prompt)
+            user_indices = [i for i, msg in enumerate(self.messages) if msg.role == "user" and i > 0]
 
-        # Build new message list
-        new_messages = [self.messages[0]]  # Keep system prompt
-        summary_count = 0
+            # Need at least 1 user message to perform summary
+            if len(user_indices) < 1:
+                print(f"{Colors.SECONDARY}  消息不足，无法总结{Colors.RESET}")
+                return
 
-        # Iterate through each user message and summarize the execution process after it
-        for i, user_idx in enumerate(user_indices):
-            # Add current user message
-            new_messages.append(self.messages[user_idx])
+            # Build new message list
+            new_messages = [self.messages[0]]  # Keep system prompt
+            summary_count = 0
 
-            # Determine message range to summarize
-            # If last user, go to end of message list; otherwise to before next user
-            if i < len(user_indices) - 1:
-                next_user_idx = user_indices[i + 1]
-            else:
-                next_user_idx = len(self.messages)
+            # Iterate through each user message and summarize the execution process after it
+            for i, user_idx in enumerate(user_indices):
+                # Update status to show progress
+                status_display.update_status(f"Summarizing round {i + 1}/{len(user_indices)}")
 
-            # Extract execution messages for this round
-            execution_messages = self.messages[user_idx + 1 : next_user_idx]
+                # Add current user message
+                new_messages.append(self.messages[user_idx])
 
-            # If there are execution messages in this round, summarize them
-            if execution_messages:
-                summary_text = await self._create_summary(execution_messages, i + 1)
-                if summary_text:
-                    summary_message = Message(
-                        role="user",
-                        content=f"[Assistant Execution Summary]\n\n{summary_text}",
-                    )
-                    new_messages.append(summary_message)
-                    summary_count += 1
+                # Determine message range to summarize
+                # If last user, go to end of message list; otherwise to before next user
+                if i < len(user_indices) - 1:
+                    next_user_idx = user_indices[i + 1]
+                else:
+                    next_user_idx = len(self.messages)
 
-        # Replace message list
-        self.messages = new_messages
+                # Extract execution messages for this round
+                execution_messages = self.messages[user_idx + 1 : next_user_idx]
+
+                # If there are execution messages in this round, summarize them
+                if execution_messages:
+                    summary_text = await self._create_summary(execution_messages, i + 1)
+                    if summary_text:
+                        summary_message = Message(
+                            role="user",
+                            content=f"[Assistant Execution Summary]\n\n{summary_text}",
+                        )
+                        new_messages.append(summary_message)
+                        summary_count += 1
+
+            # Replace message list
+            self.messages = new_messages
+
+        finally:
+            # Stop status display after summarization completes (even if error occurs)
+            status_display.stop()
 
         # Skip next token check to avoid consecutive summary triggers
         # (api_total_tokens will be updated after next LLM call)
@@ -438,6 +451,9 @@ Requirements:
                 async for chunk in self.llm.generate_stream(messages=self.messages, tools=tool_list):
                     # Check for cancellation
                     if self._check_cancelled():
+                        if not status_stopped:
+                            status_display.stop()
+                            status_stopped = True
                         break
 
                     # Handle thinking content - accumulate and update status
@@ -511,10 +527,11 @@ Requirements:
                                 buffer_chars = 0
                                 last_flush_time = current_time
 
-                    # Handle completion
-                    elif chunk.is_complete:
+                    # Handle completion - check this independently to ensure we capture final state
+                    if chunk.is_complete:
                         tool_calls = chunk.tool_calls
                         usage = chunk.usage
+                        # Exit loop after processing this final chunk
                         break
 
                 # Flush any remaining content

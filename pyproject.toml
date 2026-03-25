@@ -1,6 +1,6 @@
 [project]
 name = "heris"
-version = "0.1.0"
+version = "0.1.1"
 description = "Heris - A minimal yet powerful AI agent"
 readme = "README.md"
 requires-python = ">=3.10"

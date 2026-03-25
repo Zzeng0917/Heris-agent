@@ -7,6 +7,7 @@ This module provides a collection of tools for various tasks:
 - Memory/Note management (record, recall)
 - Skill system (get_skill)
 - MCP integration (web_search, MCP tools)
+- Worktree isolation (tasks, worktrees)
 """
 
 # Base classes
@@ -19,7 +20,7 @@ from .file import EditTool, ReadTool, WriteTool
 from .shell import BashKillTool, BashOutputTool, BashTool
 
 # Web/HTTP operations
-from .web import WebFetchTool, WebSearchTool, cleanup_http_clients
+from .web import WebFetchTool, WebSearchTool as WebSearchNative, cleanup_http_clients
 
 # Memory/Notes
 from .memory import RecallNoteTool, SessionNoteTool
@@ -29,10 +30,47 @@ from .skill import GetSkillTool, SkillLoader, create_skill_tools
 
 # MCP integration
 from .mcp import (
-    WebSearchTool,
+    WebSearchTool as WebSearchMCP,
     cleanup_mcp_connections,
     load_mcp_tools_async,
     set_mcp_timeout_config,
+)
+
+# Worktree isolation
+from .worktree import (
+    TaskCreateTool,
+    TaskListTool,
+    TaskGetTool,
+    TaskUpdateTool,
+    TaskBindWorktreeTool,
+    WorktreeCreateTool,
+    WorktreeListTool,
+    WorktreeStatusTool,
+    WorktreeRunTool,
+    WorktreeKeepTool,
+    WorktreeRemoveTool,
+    WorktreeEventsTool,
+    init_worktree_system,
+    # Autonomous agent tools
+    IdleTool,
+    ClaimTaskTool,
+    TaskAddDependencyTool,
+    ListUnclaimedTasksTool,
+)
+
+# Team protocols (s10)
+from .team import (
+    init_team_system,
+    MessageSendTool,
+    MessagePollTool,
+    MessageReadTool,
+    ShutdownRequestTool,
+    ShutdownAckTool,
+    ShutdownCheckTool,
+    PlanSubmitTool,
+    PlanApproveTool,
+    PlanListPendingTool,
+    PlanCheckResponseTool,
 )
 
 __all__ = [
@@ -49,7 +87,8 @@ __all__ = [
     "BashKillTool",
     # Web
     "WebFetchTool",
-    "WebSearchTool",
+    "WebSearchNative",
+    "WebSearchMCP",
     "cleanup_http_clients",
     # Memory
     "SessionNoteTool",
@@ -62,4 +101,35 @@ __all__ = [
     "load_mcp_tools_async",
     "cleanup_mcp_connections",
     "set_mcp_timeout_config",
+    # Worktree
+    "TaskCreateTool",
+    "TaskListTool",
+    "TaskGetTool",
+    "TaskUpdateTool",
+    "TaskBindWorktreeTool",
+    "WorktreeCreateTool",
+    "WorktreeListTool",
+    "WorktreeStatusTool",
+    "WorktreeRunTool",
+    "WorktreeKeepTool",
+    "WorktreeRemoveTool",
+    "WorktreeEventsTool",
+    "init_worktree_system",
+    # Autonomous agent tools
+    "IdleTool",
+    "ClaimTaskTool",
+    "TaskAddDependencyTool",
+    "ListUnclaimedTasksTool",
+    # Team protocols (s10)
+    "init_team_system",
+    "MessageSendTool",
+    "MessagePollTool",
+    "MessageReadTool",
+    "ShutdownRequestTool",
+    "ShutdownAckTool",
+    "ShutdownCheckTool",
+    "PlanSubmitTool",
+    "PlanApproveTool",
+    "PlanListPendingTool",
+    "PlanCheckResponseTool",
 ]

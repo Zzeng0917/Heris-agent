@@ -1,5 +1,6 @@
 """Anthropic LLM client implementation."""
 
+import json
 import logging
 from typing import Any
 
@@ -360,15 +361,23 @@ class AnthropicClient(LLMClientBase):
             elif event.type == "content_block_delta":
                 delta = event.delta
                 if delta.type == "text_delta":
-                    text_content += delta.text
-                    yield StreamChunk(content=delta.text)
+                    # Safety check for None or empty text
+                    delta_text = getattr(delta, "text", "") or ""
+                    if delta_text:
+                        text_content += delta_text
+                        yield StreamChunk(content=delta_text)
                 elif delta.type == "thinking_delta":
-                    thinking_content += delta.thinking
-                    yield StreamChunk(thinking=delta.thinking)
+                    # Safety check for None or empty thinking
+                    delta_thinking = getattr(delta, "thinking", "") or ""
+                    if delta_thinking:
+                        thinking_content += delta_thinking
+                        yield StreamChunk(thinking=delta_thinking)
                 elif delta.type == "input_json_delta":
                     # Accumulate tool call arguments
                     if current_tool_id and current_tool_id in tool_calls_data:
-                        tool_calls_data[current_tool_id]["arguments"] += delta.partial_json
+                        partial_json = getattr(delta, "partial_json", "") or ""
+                        if partial_json:
+                            tool_calls_data[current_tool_id]["arguments"] += partial_json
 
             elif event.type == "message_stop":
                 # Build tool calls from accumulated data
@@ -429,3 +438,20 @@ class AnthropicClient(LLMClientBase):
                         completion_tokens=output_tokens,
                         total_tokens=total_input_tokens + output_tokens,
                     )
+
+                # Continue to next event
+                continue
+
+            # Handle other event types (ping, etc.)
+            # Silently ignore them
+            continue
+
+        # If we exit the loop without message_stop, yield final chunk
+        if not text_content and not thinking_content and not tool_calls_data:
+            yield StreamChunk(
+                content="",
+                thinking="",
+                tool_calls=None,
+                is_complete=True,
+                usage=usage,
+            )

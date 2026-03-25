@@ -4,6 +4,7 @@ Heris CLI - TypeScript UI 启动，Python Agent 交互
 
 import argparse
 import asyncio
+import os
 import platform
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.shortcuts import message_dialog, input_dialog
 from prompt_toolkit.application import get_app
+from prompt_toolkit.document import Document
 
 from heris import LLMClient
 from heris.agents import Agent
@@ -33,6 +35,20 @@ from heris.tools.file import EditTool, ReadTool, WriteTool
 from heris.tools.mcp import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
 from heris.tools.memory import SessionNoteTool
 from heris.tools.skill import create_skill_tools
+from heris.tools.worktree import (
+    init_worktree_system,
+    TaskCreateTool, TaskListTool, TaskGetTool, TaskUpdateTool, TaskBindWorktreeTool,
+    WorktreeCreateTool, WorktreeListTool, WorktreeStatusTool, WorktreeRunTool,
+    WorktreeKeepTool, WorktreeRemoveTool, WorktreeEventsTool,
+    # Autonomous agent tools
+    IdleTool, ClaimTaskTool, TaskAddDependencyTool, ListUnclaimedTasksTool,
+)
+from heris.tools.team import (
+    init_team_system,
+    MessageSendTool, MessagePollTool, MessageReadTool,
+    ShutdownRequestTool, ShutdownAckTool, ShutdownCheckTool,
+    PlanSubmitTool, PlanApproveTool, PlanListPendingTool, PlanCheckResponseTool,
+)
 from heris.commands import cost_command
 from heris.Todo import TodoManager, TodoTool
 from heris.subagent import SubagentTool, SubagentRegistry
@@ -1365,6 +1381,43 @@ def add_workspace_tools(tools: List[Tool], config: Config, workspace_dir: Path, 
         todo_manager = TodoManager()
     tools.append(TodoTool(todo_manager))
 
+    # Initialize and add worktree tools (s12 pattern)
+    init_worktree_system(workspace_dir)
+    tools.extend([
+        TaskCreateTool(),
+        TaskListTool(),
+        TaskGetTool(),
+        TaskUpdateTool(),
+        TaskBindWorktreeTool(),
+        WorktreeCreateTool(),
+        WorktreeListTool(),
+        WorktreeStatusTool(),
+        WorktreeRunTool(),
+        WorktreeKeepTool(),
+        WorktreeRemoveTool(),
+        WorktreeEventsTool(),
+        # Autonomous agent tools
+        IdleTool(),
+        ClaimTaskTool(),
+        TaskAddDependencyTool(),
+        ListUnclaimedTasksTool(),
+    ])
+
+    # Initialize and add team protocol tools (s10 pattern)
+    init_team_system(workspace_dir)
+    tools.extend([
+        MessageSendTool(),
+        MessagePollTool(),
+        MessageReadTool(),
+        ShutdownRequestTool(),
+        ShutdownAckTool(),
+        ShutdownCheckTool(),
+        PlanSubmitTool(),
+        PlanApproveTool(),
+        PlanListPendingTool(),
+        PlanCheckResponseTool(),
+    ])
+
 
 async def _quiet_cleanup():
     loop = asyncio.get_event_loop()
@@ -1477,6 +1530,142 @@ async def run_agent(workspace_dir: Path, task: str = None):
     # 交互模式：显示会话信息
     print_session_info(agent, workspace_dir, config.llm.model)
 
+    # Path completer for @ file references
+    class PathCompleter(Completer):
+        """Completer for file paths when typing @."""
+
+        def __init__(self, base_dir: Path):
+            self.base_dir = base_dir
+
+        def get_completions(self, document, complete_event):
+            text = document.text
+
+            # Check if this is a sub-document (no @ in text) or full document
+            at_pos = text.rfind('@')
+            if at_pos == -1:
+                # Sub-document: use entire text as partial path
+                partial = text
+            else:
+                # Full document with @: get path after @
+                partial = text[at_pos + 1:]
+
+            # Determine search directory
+            if '/' in partial:
+                # User is typing a path with subdirectories
+                search_dir = self.base_dir / partial.rsplit('/', 1)[0]
+                prefix = partial.rsplit('/', 1)[0] + '/'
+            else:
+                # User is typing in current directory
+                search_dir = self.base_dir
+                prefix = ''
+
+            # Ensure search_dir exists
+            if not search_dir.exists():
+                return
+
+            try:
+                # Get all entries in the search directory
+                entries = list(search_dir.iterdir())
+
+                # Sort: directories first, then files
+                entries.sort(key=lambda x: (not x.is_dir(), x.name.lower()))
+
+                for entry in entries:
+                    name = entry.name
+
+                    # Skip hidden files unless user typed a dot
+                    if name.startswith('.') and not partial.startswith('.'):
+                        continue
+
+                    # Build the full path for matching
+                    if prefix:
+                        full_path = prefix + name
+                    else:
+                        full_path = name
+
+                    # Check if it matches the partial path
+                    if full_path.startswith(partial):
+                        # Calculate start position (relative to @)
+                        start_pos = -(len(partial))
+
+                        # Add trailing slash for directories
+                        display_name = name
+                        insert_name = name
+                        if entry.is_dir():
+                            display_name = name + '/'
+                            insert_name = name + '/'
+
+                        # Get icon based on type
+                        if entry.is_dir():
+                            icon = '📁'
+                        elif entry.is_file():
+                            # Choose icon based on file extension
+                            ext = entry.suffix.lower()
+                            if ext in ['.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.go', '.rs']:
+                                icon = '📝'
+                            elif ext in ['.md', '.txt', '.rst']:
+                                icon = '📄'
+                            elif ext in ['.json', '.yaml', '.yml', '.toml', '.ini']:
+                                icon = '⚙️'
+                            elif ext in ['.jpg', '.png', '.gif', '.svg', '.ico']:
+                                icon = '🖼️'
+                            else:
+                                icon = '📎'
+                        else:
+                            icon = '📎'
+
+                        yield Completion(
+                            insert_name,
+                            start_position=start_pos,
+                            display=f"{icon} {display_name}",
+                            display_meta='📂 folder' if entry.is_dir() else f"📄 {self._format_size(entry.stat().st_size)}" if entry.is_file() else ''
+                        )
+            except (PermissionError, OSError):
+                return
+
+        def _format_size(self, size: int) -> str:
+            """Format file size for display."""
+            if size < 1024:
+                return f"{size} B"
+            elif size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            elif size < 1024 * 1024 * 1024:
+                return f"{size / (1024 * 1024):.1f} MB"
+            else:
+                return f"{size / (1024 * 1024 * 1024):.1f} GB"
+
+    # Combined completer that handles both slash commands and file paths
+    class CombinedCompleter(Completer):
+        """Combines slash command and path completion."""
+
+        def __init__(self, slash_completer: Completer, path_completer: Completer):
+            self.slash_completer = slash_completer
+            self.path_completer = path_completer
+
+        def get_completions(self, document, complete_event):
+            text = document.text
+
+            # Check if we're completing a file path after @
+            at_pos = text.rfind('@')
+            if at_pos != -1:
+                # Check if there's a space after @ - if so, we're typing a file path
+                # Only complete paths if there's no space between @ and cursor
+                after_at = text[at_pos + 1:document.cursor_position]
+                if '@' not in after_at:  # Make sure we're not in a second @
+                    # Create a sub-document for path completion
+                    sub_text = text[at_pos + 1:]
+                    # FIX: Use actual cursor position relative to @, not len(sub_text)
+                    sub_cursor_pos = document.cursor_position - at_pos - 1
+                    sub_doc = Document(sub_text, cursor_position=sub_cursor_pos)
+                    for completion in self.path_completer.get_completions(sub_doc, complete_event):
+                        yield completion
+                    return
+
+            # Otherwise use slash command completer
+            if text.startswith('/'):
+                for completion in self.slash_completer.get_completions(document, complete_event):
+                    yield completion
+
     # 构建 prompt_toolkit session with slash command completer
     class SlashCommandCompleter(Completer):
         """Completer for slash commands with icons and descriptions."""
@@ -1528,22 +1717,57 @@ async def run_agent(workspace_dir: Path, task: str = None):
     def _(event):
         event.app.current_buffer.insert_text('\n')
 
-    @kb.add('c-i')  # Tab key to start completion
+    @kb.add('c-i')  # Tab key to start completion or accept current completion
     def _(event):
+        buffer = event.app.current_buffer
+        # If completion menu is visible, accept the current completion
+        if buffer.complete_state:
+            completion = buffer.complete_state.current_completion
+            if completion:
+                buffer.apply_completion(completion)
+            else:
+                buffer.complete_state = None
+        else:
+            # No completion menu, start completion
+            buffer.start_completion(select_first=False)
+
+    @kb.add('@')
+    def _(event):
+        """Insert @ and start file path completion."""
+        event.app.current_buffer.insert_text('@')
         event.app.current_buffer.start_completion(select_first=False)
+
+    @kb.add('enter')
+    def _(event):
+        """Handle Enter key - accept completion if menu is open, else submit."""
+        buffer = event.app.current_buffer
+        # If completion menu is visible, accept the current completion
+        if buffer.complete_state:
+            # Get current completion and apply it
+            completion = buffer.complete_state.current_completion
+            if completion:
+                buffer.apply_completion(completion)
+            else:
+                buffer.complete_state = None
+            # Don't submit - let user continue typing
+        else:
+            # No completion menu, submit the input
+            buffer.validate_and_handle()
 
     # History
     history_file = Path.home() / ".heris" / ".history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create completer
+    # Create completers
     slash_completer = SlashCommandCompleter()
+    path_completer = PathCompleter(workspace_dir)
+    combined_completer = CombinedCompleter(slash_completer, path_completer)
 
     # Session with completion
     session = PromptSession(
         history=FileHistory(str(history_file)),
         auto_suggest=AutoSuggestFromHistory(),
-        completer=slash_completer,
+        completer=combined_completer,
         style=style,
         key_bindings=kb,
         complete_style='multi_column',
@@ -1641,7 +1865,6 @@ async def run_agent(workspace_dir: Path, task: str = None):
                         agent.messages = [agent.messages[0]]
 
                         # Clear the terminal screen
-                        import os
                         os.system('cls' if os.name == 'nt' else 'clear')
 
                         # Print success message at the top
@@ -1766,6 +1989,7 @@ async def run_agent(workspace_dir: Path, task: str = None):
                 user_input = f"<reminder> Update your todos.</reminder>\n\n{user_input}"
 
             agent.add_user_message(user_input)
+            print()  # New line before status display
 
             cancel_event = asyncio.Event()
             agent.cancel_event = cancel_event

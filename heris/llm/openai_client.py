@@ -356,14 +356,16 @@ class OpenAIClient(LLMClientBase):
             delta = chunk.choices[0].delta
 
             # Handle reasoning/thinking content
-            if hasattr(delta, "reasoning") and delta.reasoning:
-                thinking_content += delta.reasoning
-                yield StreamChunk(thinking=delta.reasoning)
+            delta_reasoning = getattr(delta, "reasoning", "") or ""
+            if delta_reasoning:
+                thinking_content += delta_reasoning
+                yield StreamChunk(thinking=delta_reasoning)
 
             # Handle text content
-            if delta.content:
-                text_content += delta.content
-                yield StreamChunk(content=delta.content)
+            delta_content = getattr(delta, "content", "") or ""
+            if delta_content:
+                text_content += delta_content
+                yield StreamChunk(content=delta_content)
 
             # Handle tool calls
             if delta.tool_calls:
