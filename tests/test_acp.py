@@ -4,10 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from heris.acp import MiniMaxACPAgent
+from heris.acp import _ACP_AVAILABLE, MiniMaxACPAgent
 from heris.config import AgentConfig, Config, LLMConfig, ToolsConfig
 from heris.schema import FunctionCall, LLMResponse, ToolCall
 from heris.tools.base import Tool, ToolResult
+
+pytestmark = pytest.mark.skipif(
+    not _ACP_AVAILABLE,
+    reason="ACP tests require agent-client-protocol package (pip install heris[acp])"
+)
 
 
 class DummyConn:

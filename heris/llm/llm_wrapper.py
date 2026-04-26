@@ -121,6 +121,105 @@ class LLMClient:
         """Set retry callback."""
         self._client.retry_callback = value
 
+    def set_provider(self, provider: LLMProvider) -> None:
+        """Update the provider and recreate the underlying client.
+
+        Args:
+            provider: New LLM provider to use
+        """
+        if self.provider == provider:
+            return  # No change needed
+
+        self.provider = provider
+
+        # Check if this is a MiniMax API endpoint
+        is_minimax = any(domain in self.api_base for domain in self.MINIMAX_DOMAINS)
+
+        if is_minimax:
+            # For MiniMax API, ensure correct suffix based on provider
+            api_base = self.api_base.replace("/anthropic", "").replace("/v1", "")
+            if provider == LLMProvider.ANTHROPIC:
+                full_api_base = f"{api_base}/anthropic"
+            elif provider == LLMProvider.OPENAI:
+                full_api_base = f"{api_base}/v1"
+            else:
+                raise ValueError(f"Unsupported provider: {provider}")
+        else:
+            # For third-party APIs, use api_base as-is
+            full_api_base = self.api_base
+
+        # Recreate the underlying client
+        if provider == LLMProvider.ANTHROPIC:
+            self._client = AnthropicClient(
+                api_key=self.api_key,
+                api_base=full_api_base,
+                model=self.model,
+                retry_config=self.retry_config,
+                timeout=self.timeout,
+            )
+        elif provider == LLMProvider.OPENAI:
+            self._client = OpenAIClient(
+                api_key=self.api_key,
+                api_base=full_api_base,
+                model=self.model,
+                retry_config=self.retry_config,
+                timeout=self.timeout,
+            )
+        else:
+            raise ValueError(f"Unsupported provider: {provider}")
+
+        logger.info("Updated LLM client provider to: %s, api_base: %s", provider, full_api_base)
+
+    def set_api_base(self, api_base: str) -> None:
+        """Update api_base and recreate the underlying client if needed.
+
+        Args:
+            api_base: New API base URL
+        """
+        api_base = api_base.rstrip("/")
+
+        if self.api_base == api_base:
+            return  # No change needed
+
+        self.api_base = api_base
+
+        # Check if this is a MiniMax API endpoint - needs suffix handling
+        is_minimax = any(domain in self.api_base for domain in self.MINIMAX_DOMAINS)
+
+        if is_minimax:
+            # For MiniMax API, ensure correct suffix based on provider
+            base_url = self.api_base.replace("/anthropic", "").replace("/v1", "")
+            if self.provider == LLMProvider.ANTHROPIC:
+                full_api_base = f"{base_url}/anthropic"
+            elif self.provider == LLMProvider.OPENAI:
+                full_api_base = f"{base_url}/v1"
+            else:
+                raise ValueError(f"Unsupported provider: {self.provider}")
+        else:
+            full_api_base = self.api_base
+
+        # Recreate the underlying client
+        if self.provider == LLMProvider.ANTHROPIC:
+            self._client = AnthropicClient(
+                api_key=self.api_key,
+                api_base=full_api_base,
+                model=self.model,
+                retry_config=self.retry_config,
+                timeout=self.timeout,
+            )
+        elif self.provider == LLMProvider.OPENAI:
+            self._client = OpenAIClient(
+                api_key=self.api_key,
+                api_base=full_api_base,
+                model=self.model,
+                retry_config=self.retry_config,
+                timeout=self.timeout,
+            )
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}")
+
+        logger.info("Updated LLM client api_base to: %s", full_api_base)
+
     async def generate(
         self,
         messages: list[Message],

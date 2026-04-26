@@ -1,0 +1,279 @@
+# Model configuration for Heris
+# This file defines all available models and their providers
+
+providers:
+  anthropic:
+    name: "Anthropic"
+    color: "bright_yellow"
+    api_base: "https://api.anthropic.com"
+  openai:
+    name: "OpenAI"
+    color: "bright_green"
+    api_base: "https://api.openai.com/v1"
+  minimax:
+    name: "MiniMax"
+    color: "bright_blue"
+    api_base: "https://api.minimaxi.com/v1"
+  gemini:
+    name: "Gemini"
+    color: "bright_blue"
+    api_base: "https://generativelanguage.googleapis.com/v1beta"
+  mistral:
+    name: "Mistral"
+    color: "bright_cyan"
+    api_base: "https://api.mistral.ai/v1"
+  deepseek:
+    name: "DeepSeek"
+    color: "bright_magenta"
+    api_base: "https://api.deepseek.com/v1"
+  xai:
+    name: "xAI"
+    color: "bright_white"
+    api_base: "https://api.x.ai/v1"
+  groq:
+    name: "Groq"
+    color: "bright_red"
+    api_base: "https://api.groq.com/openai/v1"
+
+models:
+  # Anthropic Models
+  - id: "claude-sonnet-4-6"
+    provider: "anthropic"
+    name: "Claude Sonnet 4.6"
+    max_tokens: 8192
+    context: 200000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "claude-opus-4-6"
+    provider: "anthropic"
+    name: "Claude Opus 4.6"
+    max_tokens: 8192
+    context: 200000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "premium"
+
+  - id: "claude-haiku-4-5"
+    provider: "anthropic"
+    name: "Claude Haiku 4.5"
+    max_tokens: 4096
+    context: 200000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "basic"
+
+  # OpenAI Models
+  - id: "gpt-4"
+    provider: "openai"
+    name: "GPT-4"
+    max_tokens: 4096
+    context: 8192
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "gpt-4o"
+    provider: "openai"
+    name: "GPT-4o"
+    max_tokens: 16384
+    context: 128000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "gpt-4o-mini"
+    provider: "openai"
+    name: "GPT-4o Mini"
+    max_tokens: 16384
+    context: 128000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "basic"
+
+  - id: "gpt-4.5-preview"
+    provider: "openai"
+    name: "GPT-4.5 Preview"
+    max_tokens: 16384
+    context: 128000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "premium"
+
+  - id: "o1"
+    provider: "openai"
+    name: "o1"
+    max_tokens: 100000
+    context: 200000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "premium"
+
+  - id: "o3-mini"
+    provider: "openai"
+    name: "o3-mini"
+    max_tokens: 100000
+    context: 200000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "gpt-5"
+    provider: "openai"
+    name: "GPT-5"
+    max_tokens: 32768
+    context: 200000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "premium"
+
+  - id: "gpt-5-mini"
+    provider: "openai"
+    name: "GPT-5 Mini"
+    max_tokens: 16384
+    context: 128000
+    supports_vision: true
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "gpt-5-nano"
+    provider: "openai"
+    name: "GPT-5 Nano"
+    max_tokens: 8192
+    context: 64000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "basic"
+
+  # Gemini Models
+  - id: "gemini-2.0-flash"
+    provider: "gemini"
+    name: "Gemini 2.0 Flash"
+    max_tokens: 8192
+    context: 1048576
+    supports_vision: true
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "gemini-2.0-flash-lite"
+    provider: "gemini"
+    name: "Gemini 2.0 Flash Lite"
+    max_tokens: 8192
+    context: 1048576
+    supports_vision: true
+    supports_function_calling: true
+    tier: "basic"
+
+  - id: "gemini-2.0-flash-thinking-exp"
+    provider: "gemini"
+    name: "Gemini 2.0 Flash Thinking"
+    max_tokens: 8192
+    context: 1048576
+    supports_vision: true
+    supports_function_calling: true
+    tier: "experimental"
+
+  # Mistral Models
+  - id: "mistral-large-latest"
+    provider: "mistral"
+    name: "Mistral Large"
+    max_tokens: 128000
+    context: 128000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "premium"
+
+  - id: "mistral-small-latest"
+    provider: "mistral"
+    name: "Mistral Small"
+    max_tokens: 8191
+    context: 32000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  # DeepSeek Models
+  - id: "deepseek-reasoner"
+    provider: "deepseek"
+    name: "DeepSeek Reasoner"
+    max_tokens: 8192
+    context: 65536
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "deepseek-chat"
+    provider: "deepseek"
+    name: "DeepSeek Chat"
+    max_tokens: 8192
+    context: 65536
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "deepseek-coder"
+    provider: "deepseek"
+    name: "DeepSeek Coder"
+    max_tokens: 4096
+    context: 128000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  # xAI Models
+  - id: "grok-beta"
+    provider: "xai"
+    name: "Grok Beta"
+    max_tokens: 131072
+    context: 131072
+    supports_vision: true
+    supports_function_calling: true
+    tier: "standard"
+
+  # Groq Models
+  - id: "llama-3.3-70b-versatile"
+    provider: "groq"
+    name: "Llama 3.3 70B"
+    max_tokens: 8192
+    context: 128000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "llama-3.1-8b-instant"
+    provider: "groq"
+    name: "Llama 3.1 8B"
+    max_tokens: 8000
+    context: 8000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "basic"
+
+  - id: "mixtral-8x7b-32768"
+    provider: "groq"
+    name: "Mixtral 8x7B"
+    max_tokens: 32768
+    context: 32768
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  # MiniMax Models
+  - id: "kimi-for-coding"
+    provider: "minimax"
+    name: "MiniMax Kimi for Coding"
+    max_tokens: 8192
+    context: 1000000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"
+
+  - id: "MiniMax-M2.5"
+    provider: "minimax"
+    name: "MiniMax M2.5"
+    max_tokens: 8192
+    context: 1000000
+    supports_vision: false
+    supports_function_calling: true
+    tier: "standard"

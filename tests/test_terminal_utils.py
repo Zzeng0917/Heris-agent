@@ -203,7 +203,6 @@ class TestRealWorldScenarios:
 
     def test_banner_text(self):
         """Test banner text from cli.py."""
-        banner = "🤖 Heris - Multi-turn Interactive Session"
+        banner = "Heris - Multi-turn Interactive Session"
         width = calculate_display_width(banner)
-        # "🤖" (2) + " Heris - Multi-turn Interactive Session" (40) = 42
-        assert width == 42
+        assert width == 38

@@ -3,7 +3,7 @@
 Provides unified configuration loading and management functionality
 """
 
-from functools import lru_cache
+from typing import ClassVar
 from pathlib import Path
 
 import yaml
@@ -242,3 +242,135 @@ class Config(BaseModel):
 
         # Fallback to package config directory for error message purposes
         return cls.get_package_dir() / "config" / "config.yaml"
+
+
+# Model Configuration Classes
+
+class ModelConfig(BaseModel):
+    """Single model configuration"""
+
+    id: str
+    provider: str
+    name: str
+    max_tokens: int = 8192
+    context: int = 100000
+    supports_vision: bool = False
+    supports_function_calling: bool = True
+    api_base: str | None = None  # Override provider default if specified
+    tier: str = "standard"
+    description: str = ""
+
+
+class ProviderConfig(BaseModel):
+    """Provider configuration"""
+
+    name: str
+    color: str
+    api_base: str
+
+
+class ModelsConfig(BaseModel):
+    """Models and providers configuration"""
+
+    providers: dict[str, ProviderConfig] = {}
+    models: list[ModelConfig] = []
+
+    # Class-level cache (use separate name to avoid Pydantic field conflict)
+    _models_cache: ClassVar["ModelsConfig | None"] = None
+
+    @classmethod
+    def load(cls) -> "ModelsConfig":
+        """Load models configuration from models.yaml with caching."""
+        if cls._models_cache is not None:
+            return cls._models_cache
+
+        config_path = cls.find_config_file("models.yaml")
+        if not config_path:
+            raise FileNotFoundError(
+                "models.yaml not found. Please ensure heris/config/models.yaml exists."
+            )
+
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        if not data:
+            raise ValueError("models.yaml is empty")
+
+        # Parse providers
+        providers = {}
+        for key, value in data.get("providers", {}).items():
+            providers[key] = ProviderConfig(
+                name=value.get("name", key),
+                color=value.get("color", "white"),
+                api_base=value.get("api_base", ""),
+            )
+
+        # Parse models
+        models = []
+        for m in data.get("models", []):
+            models.append(ModelConfig(
+                id=m["id"],
+                provider=m["provider"],
+                name=m["name"],
+                max_tokens=m.get("max_tokens", 8192),
+                context=m.get("context", 100000),
+                supports_vision=m.get("supports_vision", False),
+                supports_function_calling=m.get("supports_function_calling", True),
+                api_base=m.get("api_base"),
+                tier=m.get("tier", "standard"),
+                description=m.get("description", ""),
+            ))
+
+        cls._models_cache = cls(providers=providers, models=models)
+        return cls._models_cache
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear the cached configuration."""
+        cls._models_cache = None
+
+    @classmethod
+    def find_config_file(cls, filename: str) -> Path | None:
+        """Find configuration file with priority order."""
+        # Priority 1: Development mode - current directory's config/ subdirectory
+        dev_config = Path.cwd() / "heris" / "config" / filename
+        if dev_config.exists():
+            return dev_config
+
+        # Priority 2: User config directory
+        user_config = Path.home() / ".heris" / "config" / filename
+        if user_config.exists():
+            return user_config
+
+        # Priority 3: Package installation directory's config/ subdirectory
+        package_config = Config.get_package_dir() / "config" / filename
+        if package_config.exists():
+            return package_config
+
+        return None
+
+    def get_model(self, model_id: str) -> ModelConfig | None:
+        """Get model by ID."""
+        for model in self.models:
+            if model.id == model_id:
+                return model
+        return None
+
+    def get_provider(self, provider: str) -> ProviderConfig | None:
+        """Get provider by name."""
+        return self.providers.get(provider)
+
+    def get_model_api_base(self, model_id: str) -> str | None:
+        """Get API base for a model, checking model override first then provider default."""
+        model = self.get_model(model_id)
+        if not model:
+            return None
+
+        if model.api_base:
+            return model.api_base
+
+        provider = self.get_provider(model.provider)
+        if provider:
+            return provider.api_base
+
+        return None

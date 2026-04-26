@@ -1,52 +1,52 @@
-"""Tests for the /model slash command functionality - updated for Kode-Agent design."""
+"""Tests for the /model slash command functionality - updated for ModelsConfig."""
 
 import pytest
 from unittest.mock import Mock
 
 from heris.cli import (
-    AVAILABLE_MODELS,
-    PROVIDERS,
+    get_models_config,
     COMMAND_CATEGORIES,
     SLASH_COMMANDS,
     LIGHT_THEME,
-    ModelSelector,
     SlashCommandPicker,
 )
+from heris.config import ModelsConfig
 
 
 class TestModelDefinitions:
     """Test the new model definitions structure."""
 
     def test_available_models_structure(self):
-        """Test that AVAILABLE_MODELS follows the expected structure."""
-        assert len(AVAILABLE_MODELS) > 0
+        """Test that ModelsConfig follows the expected structure."""
+        models_cfg = get_models_config()
+        assert len(models_cfg.models) > 0
 
-        for model_id, provider, name, specs in AVAILABLE_MODELS:
-            assert isinstance(model_id, str)
-            assert isinstance(provider, str)
-            assert isinstance(name, str)
-            assert isinstance(specs, dict)
-
-            # Check required fields
-            assert "max_tokens" in specs
-            assert "context" in specs
-            assert "description" in specs
-            assert "tier" in specs
+        for model in models_cfg.models:
+            assert isinstance(model.id, str)
+            assert isinstance(model.provider, str)
+            assert isinstance(model.name, str)
+            assert isinstance(model.max_tokens, int)
+            assert isinstance(model.context, int)
 
             # Check tier values
-            assert specs["tier"] in ["premium", "standard", "basic", "experimental"]
+            assert model.tier in ["premium", "standard", "basic", "experimental"]
 
-    def test_providers_structure(self):
-        """Test that PROVIDERS follows the expected structure."""
-        for key, value in PROVIDERS.items():
-            assert "name" in value
-            assert "color" in value
+    def test_providers_defined(self):
+        """Test that providers are defined in ModelsConfig."""
+        models_cfg = get_models_config()
+        assert len(models_cfg.providers) > 0
+
+        for key, provider in models_cfg.providers.items():
+            assert isinstance(provider.name, str)
+            assert isinstance(provider.color, str)
+            assert isinstance(provider.api_base, str)
 
     def test_all_model_providers_defined(self):
-        """Test that all model providers are defined in PROVIDERS."""
-        providers_in_models = set(m[1] for m in AVAILABLE_MODELS)
+        """Test that all model providers are defined."""
+        models_cfg = get_models_config()
+        providers_in_models = set(m.provider for m in models_cfg.models)
         for provider in providers_in_models:
-            assert provider in PROVIDERS, f"Provider {provider} not defined"
+            assert provider in models_cfg.providers, f"Provider {provider} not defined"
 
 
 class TestSlashCommands:
@@ -135,84 +135,25 @@ class TestSlashCommandPicker:
         assert picker.current_index >= 0
 
 
-class TestModelSelector:
-    """Tests for the ModelSelector class with new structure."""
+class TestModelCommand:
+    """Tests for the /model command functionality."""
 
-    def test_model_selector_init(self):
-        """Test ModelSelector initialization."""
-        config = Mock()
-        config.llm.model = "gpt-4o"
-        config.llm.provider = Mock(value="openai")
+    def test_available_model_ids(self):
+        """Test that all model IDs are accessible."""
+        models_cfg = get_models_config()
+        model_ids = {m.id for m in models_cfg.models}
+        assert len(model_ids) > 0
+        assert "claude-sonnet-4-6" in model_ids
+        assert "gpt-4o" in model_ids
+        assert "gemini-2.0-flash" in model_ids
 
-        llm_client = Mock()
-
-        selector = ModelSelector(config, llm_client)
-
-        assert selector.current_index == 0
-        assert selector._num_lines == 0
-        assert len(selector.models) > 0
-
-    def test_model_selector_build_list(self):
-        """Test ModelSelector._build_model_list()."""
-        config = Mock()
-        config.llm.model = "gpt-4o"
-        config.llm.provider = Mock(value="openai")
-
-        llm_client = Mock()
-        selector = ModelSelector(config, llm_client)
-        models = selector.models
-
-        assert len(models) > 0
-
-        # First item should be "keep current"
-        assert models[0]["is_current"] == True
-
-        # Check that we have headers and models
-        headers = [m for m in models if m.get("tier") == "header"]
-        model_items = [m for m in models if m.get("tier") != "header" and not m.get("is_current")]
-
-        assert len(headers) > 0
-        assert len(model_items) > 0
-
-    def test_is_selectable(self):
-        """Test ModelSelector._is_selectable()."""
-        config = Mock()
-        config.llm.model = "gpt-4o"
-        config.llm.provider = Mock(value="openai")
-
-        llm_client = Mock()
-        selector = ModelSelector(config, llm_client)
-
-        # Headers should not be selectable
-        header = {"id": None, "tier": "header"}
-        assert selector._is_selectable(header) == False
-
-        # Normal models should be selectable
-        model = {"id": "gpt-4", "tier": "standard"}
-        assert selector._is_selectable(model) == True
-
-        # Keep current should be selectable
-        current = {"id": "default", "is_current": True}
-        assert selector._is_selectable(current) == True
-
-    def test_format_context(self):
-        """Test ModelSelector._format_context()."""
-        config = Mock()
-        config.llm.model = "gpt-4o"
-        config.llm.provider = Mock(value="openai")
-
-        llm_client = Mock()
-        selector = ModelSelector(config, llm_client)
-
-        assert selector._format_context(1000) == "1.0K"
-        assert selector._format_context(128000) == "128.0K"
-        assert selector._format_context(2000000) == "2.0M"
-
-    def test_tier_icons(self):
-        """Test that ModelSelector has tier icons."""
-        assert "premium" in ModelSelector.TIER_ICONS
-        assert "standard" in ModelSelector.TIER_ICONS
-        assert "basic" in ModelSelector.TIER_ICONS
+    def test_model_command_in_slash_commands(self):
+        """Test that /model command is in SLASH_COMMANDS."""
+        model_cmds = [c for c in SLASH_COMMANDS if c[0] == "/model"]
+        assert len(model_cmds) == 1
+        cmd, desc, category, icon = model_cmds[0]
+        assert desc == "Show or set model"
+        assert category == "model"
 
 
 class TestMainstreamModels:
@@ -220,14 +161,16 @@ class TestMainstreamModels:
 
     def test_anthropic_models_present(self):
         """Test that Anthropic models are included."""
-        model_ids = [m[0] for m in AVAILABLE_MODELS]
+        models_cfg = get_models_config()
+        model_ids = [m.id for m in models_cfg.models]
         assert "claude-sonnet-4-6" in model_ids
         assert "claude-opus-4-6" in model_ids
         assert "claude-haiku-4-5" in model_ids
 
     def test_openai_models_present(self):
         """Test that OpenAI models are included."""
-        model_ids = [m[0] for m in AVAILABLE_MODELS]
+        models_cfg = get_models_config()
+        model_ids = [m.id for m in models_cfg.models]
         assert "gpt-4" in model_ids
         assert "gpt-4o" in model_ids
         assert "gpt-4o-mini" in model_ids
@@ -237,16 +180,52 @@ class TestMainstreamModels:
 
     def test_gemini_models_present(self):
         """Test that Gemini models are included."""
-        model_ids = [m[0] for m in AVAILABLE_MODELS]
+        models_cfg = get_models_config()
+        model_ids = [m.id for m in models_cfg.models]
         assert "gemini-2.0-flash" in model_ids
         assert "gemini-2.0-flash-lite" in model_ids
 
     def test_deepseek_models_present(self):
         """Test that DeepSeek models are included."""
-        model_ids = [m[0] for m in AVAILABLE_MODELS]
+        models_cfg = get_models_config()
+        model_ids = [m.id for m in models_cfg.models]
         assert "deepseek-chat" in model_ids
         assert "deepseek-reasoner" in model_ids
         assert "deepseek-coder" in model_ids
+
+
+class TestModelsConfig:
+    """Tests for ModelsConfig functionality."""
+
+    def test_get_model(self):
+        """Test get_model() method."""
+        models_cfg = get_models_config()
+        model = models_cfg.get_model("claude-sonnet-4-6")
+        assert model is not None
+        assert model.id == "claude-sonnet-4-6"
+        assert model.provider == "anthropic"
+
+    def test_get_model_not_found(self):
+        """Test get_model() returns None for unknown model."""
+        models_cfg = get_models_config()
+        model = models_cfg.get_model("nonexistent-model")
+        assert model is None
+
+    def test_get_provider(self):
+        """Test get_provider() method."""
+        models_cfg = get_models_config()
+        provider = models_cfg.get_provider("anthropic")
+        assert provider is not None
+        assert provider.name == "Anthropic"
+
+    def test_get_model_api_base(self):
+        """Test get_model_api_base() returns provider api_base."""
+        models_cfg = get_models_config()
+        api_base = models_cfg.get_model_api_base("claude-sonnet-4-6")
+        assert api_base is not None
+        # Should return the provider's api_base, not model override
+        provider = models_cfg.get_provider("anthropic")
+        assert api_base == provider.api_base
 
 
 if __name__ == "__main__":

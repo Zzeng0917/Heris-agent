@@ -1,4 +1,8 @@
-"""ACP (Agent Client Protocol) bridge for Heris."""
+"""ACP (Agent Client Protocol) bridge for Heris.
+
+This module requires the 'agent-client-protocol' package.
+Install with: pip install heris[acp]
+"""
 
 from __future__ import annotations
 
@@ -6,33 +10,10 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from acp import (
-    PROTOCOL_VERSION,
-    AgentSideConnection,
-    CancelNotification,
-    InitializeRequest,
-    InitializeResponse,
-    NewSessionRequest,
-    NewSessionResponse,
-    PromptRequest,
-    PromptResponse,
-    session_notification,
-    start_tool_call,
-    stdio_streams,
-    text_block,
-    tool_content,
-    update_agent_message,
-    update_agent_thought,
-    update_tool_call,
-)
-from pydantic import field_validator
-from acp.schema import AgentCapabilities, Implementation, McpCapabilities
-
 from heris.agents import Agent
-from heris.cli import add_workspace_tools, initialize_base_tools
 from heris.config import Config
 from heris.llm import LLMClient
 from heris.retry import RetryConfig as RetryConfigBase
@@ -40,25 +21,66 @@ from heris.schema import Message
 
 logger = logging.getLogger(__name__)
 
-
+# Try to import ACP dependencies
 try:
-    class InitializeRequestPatch(InitializeRequest):
-        @field_validator("protocolVersion", mode="before")
-        @classmethod
-        def normalize_protocol_version(cls, value: Any) -> int:
-            if isinstance(value, str):
-                try:
-                    return int(value.split(".")[0])
-                except Exception:
-                    return 1
-            if isinstance(value, (int, float)):
-                return int(value)
-            return 1
+    from acp import (
+        PROTOCOL_VERSION,
+        AgentSideConnection,
+        CancelNotification,
+        InitializeRequest,
+        InitializeResponse,
+        NewSessionRequest,
+        NewSessionResponse,
+        PromptRequest,
+        PromptResponse,
+        session_notification,
+        start_tool_call,
+        stdio_streams,
+        text_block,
+        tool_content,
+        update_agent_message,
+        update_agent_thought,
+        update_tool_call,
+    )
+    from acp.schema import AgentCapabilities, Implementation
+    from pydantic import field_validator
+    _ACP_AVAILABLE = True
+except ImportError:
+    _ACP_AVAILABLE = False
+    PROTOCOL_VERSION = 1
+    AgentSideConnection = None
+    # Placeholder types for type hints when ACP is not available
+    CancelNotification = Any
+    InitializeRequest = Any
+    InitializeResponse = Any
+    NewSessionRequest = Any
+    NewSessionResponse = Any
+    PromptRequest = Any
+    PromptResponse = Any
+    AgentCapabilities = Any
+    Implementation = Any
+    field_validator = None
 
-    InitializeRequest = InitializeRequestPatch
-    InitializeRequest.model_rebuild(force=True)
-except Exception:  # pragma: no cover - defensive
-    logger.debug("ACP schema patch skipped")
+
+if _ACP_AVAILABLE:
+    try:
+        class InitializeRequestPatch(InitializeRequest):
+            @field_validator("protocolVersion", mode="before")
+            @classmethod
+            def normalize_protocol_version(cls, value: Any) -> int:
+                if isinstance(value, str):
+                    try:
+                        return int(value.split(".")[0])
+                    except Exception:
+                        return 1
+                if isinstance(value, (int, float)):
+                    return int(value)
+                return 1
+
+        InitializeRequest = InitializeRequestPatch
+        InitializeRequest.model_rebuild(force=True)
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("ACP schema patch skipped")
 
 
 @dataclass
@@ -72,7 +94,7 @@ class MiniMaxACPAgent:
 
     def __init__(
         self,
-        conn: AgentSideConnection,
+        conn: Any,
         config: Config,
         llm: LLMClient,
         base_tools: list,
@@ -85,28 +107,29 @@ class MiniMaxACPAgent:
         self._system_prompt = system_prompt
         self._sessions: dict[str, SessionState] = {}
 
-    async def initialize(self, params: InitializeRequest) -> InitializeResponse:  # noqa: ARG002
+    async def initialize(self, params: Any) -> Any:
         return InitializeResponse(
             protocolVersion=PROTOCOL_VERSION,
             agentCapabilities=AgentCapabilities(loadSession=False),
-            agentInfo=Implementation(name="heris", title="Heris", version="0.1.0"),
+            agentInfo=Implementation(name="heris", title="Heris", version="0.1.1"),
         )
 
-    async def newSession(self, params: NewSessionRequest) -> NewSessionResponse:
+    async def newSession(self, params: Any) -> Any:
         session_id = f"sess-{len(self._sessions)}-{uuid4().hex[:8]}"
-        workspace = Path(params.cwd or self._config.agent.workspace_dir).expanduser()
+        cwd = getattr(params, 'cwd', None) if params else None
+        workspace = Path(cwd or self._config.agent.workspace_dir).expanduser()
         if not workspace.is_absolute():
             workspace = workspace.resolve()
         tools = list(self._base_tools)
+        from heris.cli import add_workspace_tools
         add_workspace_tools(tools, self._config, workspace)
         agent = Agent(llm_client=self._llm, system_prompt=self._system_prompt, tools=tools, max_steps=self._config.agent.max_steps, workspace_dir=str(workspace))
         self._sessions[session_id] = SessionState(agent=agent)
         return NewSessionResponse(sessionId=session_id)
 
-    async def prompt(self, params: PromptRequest) -> PromptResponse:
+    async def prompt(self, params: Any) -> Any:
         state = self._sessions.get(params.sessionId)
         if not state:
-            # Auto-create session if not found (compatibility with clients that skip newSession)
             logger.warning(f"Session '{params.sessionId}' not found, auto-creating new session")
             new_session = await self.newSession(NewSessionRequest(cwd=None))
             state = self._sessions.get(new_session.sessionId)
@@ -119,7 +142,7 @@ class MiniMaxACPAgent:
         stop_reason = await self._run_turn(state, params.sessionId)
         return PromptResponse(stopReason=stop_reason)
 
-    async def cancel(self, params: CancelNotification) -> None:
+    async def cancel(self, params: Any) -> None:
         state = self._sessions.get(params.sessionId)
         if state:
             state.cancelled = True
@@ -145,9 +168,8 @@ class MiniMaxACPAgent:
                 return "end_turn"
             for call in response.tool_calls:
                 name, args = call.function.name, call.function.arguments
-                # Show tool name with key arguments for better visibility
                 args_preview = ", ".join(f"{k}={repr(v)[:50]}" for k, v in list(args.items())[:2]) if isinstance(args, dict) else ""
-                label = f"🔧 {name}({args_preview})" if args_preview else f"🔧 {name}()"
+                label = f"Tool {name}({args_preview})" if args_preview else f"Tool {name}()"
                 await self._send(session_id, start_tool_call(call.id, label, kind="execute", raw_input=args))
                 tool = agent.tools.get(name)
                 if not tool:
@@ -168,10 +190,22 @@ class MiniMaxACPAgent:
         await self._conn.sessionUpdate(session_notification(session_id, update))
 
 
+def _check_acp_available():
+    """Raise ImportError if ACP package is not installed."""
+    if not _ACP_AVAILABLE:
+        raise ImportError(
+            "ACP module requires 'agent-client-protocol' package. "
+            "Install with: pip install heris[acp]"
+        )
+
+
 async def run_acp_server(config: Config | None = None) -> None:
     """Run Heris as an ACP-compatible stdio server."""
+    _check_acp_available()
+
     config = config or Config.load()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    from heris.cli import initialize_base_tools
     base_tools, skill_loader = await initialize_base_tools(config)
     prompt_path = Config.find_config_file(config.agent.system_prompt_path)
     if prompt_path and prompt_path.exists():
@@ -191,7 +225,8 @@ async def run_acp_server(config: Config | None = None) -> None:
 
 
 def main() -> None:
+    _check_acp_available()
     asyncio.run(run_acp_server())
 
 
-__all__ = ["MiniMaxACPAgent", "run_acp_server", "main"]
+__all__ = ["MiniMaxACPAgent", "run_acp_server", "main", "_ACP_AVAILABLE"]
